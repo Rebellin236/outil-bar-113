@@ -60,7 +60,10 @@
     role = r;
     const { data: rr } = await sb.from('bar_roles').select('nom').eq('user_id', user.id).maybeSingle();
     roleName = rr ? rr.nom : '';
-    if (role === 'admin') return renderDesk();
+    if (role === 'admin') {
+      if (location.hash === '#comptage' || (window.innerWidth < 760 && location.hash !== '#poste')) return window.BarViews.phone(app);
+      return renderDesk();
+    }
     if (role === 'tablette') {
       app.innerHTML = `<div class="center"><div style="display:flex;flex-direction:column;gap:12px;align-items:center"><div class="seal">1.13</div><h2>Tablette du bar</h2><p class="hint">L'écran des tâches et des pertes arrive à la prochaine étape.</p><button class="btn ghost" id="out">Se déconnecter</button></div></div>`;
       $('#out').onclick = logout; return;
@@ -71,17 +74,24 @@
 
   /* ---------------- Poste (admin) ---------------- */
   const NAV = [
-    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts'], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['week', 'Synthèse du lundi']]],
+    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts', true], ['comptage', 'Comptage du jour', true], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['week', 'Synthèse du lundi']]],
     ['Équipe', [['pertes', 'Pertes'], ['taches', 'Tâches']]],
-    ['Réglages', [['rot', 'Rotation Bar'], ['cal', 'Calendrier'], ['seuils', 'Seuils et alertes'], ['dlc', 'Durées après ouverture']]]
+    ['Réglages', [['rot', 'Rotation Bar'], ['cal', 'Calendrier', true], ['seuils', 'Seuils et alertes'], ['dlc', 'Durées après ouverture']]]
   ];
-  function renderDesk() {
+  let section = 'today';
+  function renderDesk(sec) {
+    if (sec) section = sec;
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 12</div></div></div>
-      ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button ${on ? 'aria-current="page"' : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 13</div></div></div>
+      ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button data-sec="${k}" ${on ? (k === section ? 'aria-current="page"' : '') : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
     $('#out').onclick = logout;
+    app.querySelectorAll('[data-sec]').forEach(b => { if (!b.disabled) b.onclick = () => {
+      if (b.dataset.sec === 'comptage') { location.hash = 'comptage'; return window.BarViews.phone(app); }
+      renderDesk(b.dataset.sec); }; });
+    if (section === 'ecarts') return window.BarViews.ecarts($('#main'));
+    if (section === 'cal') return window.BarViews.calendrier($('#main'));
     renderToday();
   }
 
@@ -273,6 +283,8 @@
     });
   }
 
+  window.BarCtx = { sb, $, fr, eur, esc, fmtD, fmtDT, todayParis, TZ, toast, user: () => user, roleName: () => roleName,
+    poste: () => { location.hash = 'poste'; renderDesk(); }, logout };
   sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') renderLogin(); });
   boot();
 })();
