@@ -5,7 +5,7 @@
   const C = () => window.BarCtx;
   const U = { litres: 'L', bouteilles: 'btl', pieces: 'pc' };
   const COLS = { eco: 'Économat', bar: 'Bar', ms: 'Mshop' };
-  const CAUSES = ['Erreur de comptage', 'Perte non déclarée', 'Mauvais article encaissé', 'Vente non reliée au stock', 'Réception non saisie', 'Offert non saisi', 'Vol suspecté', 'Inconnue'];
+  const CAUSES = ['Erreur de comptage', 'Surdosage', 'Perte non déclarée', 'Mauvais article encaissé', 'Vente non reliée au stock', 'Réception non saisie', 'Offert non saisi', 'Vol suspecté', 'Autre', 'Inconnue'];
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
   /* ================= Données communes ================= */
@@ -319,7 +319,8 @@
       <td class="n">${r.complet ? fr(r.total, 3) : '–'}</td><td class="n">${r.theo !== null ? fr(r.theo, 3) : '–'}</td><td class="n">${r.pertes ? fr(r.pertes) : '0'}</td>
       <td class="n ${r.e < 0 ? 'neg' : r.e > 0 ? 'pos' : ''}">${r.e === null ? '–' : (r.e > 0 ? '+' : '') + fr(r.e, 3) + ' ' + U[r.article.unite]}</td>
       <td class="n ${r.ev < 0 ? 'neg' : ''}">${r.ev === null ? '–' : eur(r.ev)}</td><td>${pill(r.statut)}</td>
-      <td>${r.hors ? `<select data-cause="${r.article.id}" aria-label="Cause" style="font:inherit;font-size:13px;padding:5px 7px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)"><option value="">Cause…</option>${CAUSES.map(c => `<option ${r.cause && r.cause.cause === c ? 'selected' : ''}>${c}</option>`).join('')}</select>` : ''}</td></tr>`).join('');
+      <td>${r.hors ? `<div class="cause"><select data-cause="${r.article.id}" aria-label="Cause"><option value="">Cause…</option>${CAUSES.concat(r.cause && !CAUSES.includes(r.cause.cause) ? [r.cause.cause] : []).map(c => `<option ${r.cause && r.cause.cause === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <input data-note="${r.article.id}" maxlength="200" placeholder="Précision (libre)…" aria-label="Précision sur la cause" value="${esc(r.cause && r.cause.note || '')}"></div>` : ''}</td></tr>`).join('');
     M.innerHTML = `<div class="main-h"><div><h2>Écarts</h2><p>Écart = compté − (théorique − pertes déclarées pas encore transférées dans Bizzon). Négatif = manque.</p></div>
       <select id="cptSel" aria-label="Jour de comptage" style="font:inherit;font-weight:700;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)">${cpts.map(c => `<option value="${c.id}" ${c.id === cpt.id ? 'selected' : ''}>${cap(fmtD(c.date_jour))}${c.valide_le ? '' : ' (en cours)'}</option>`).join('')}</select></div>
       <div class="tiles">
@@ -333,11 +334,15 @@
       </tbody></table></div>
       <span class="hint">« À recontrôler » : hors seuil sans recompte sur place (stock importé après le comptage) ; l'article sera recompté au prochain comptage. Seuils : 5 L, 0,2 bouteille, 0 pièce ou 10 €.</span>`;
     M.querySelector('#cptSel').onchange = e => { selCpt = +e.target.value; ecarts(M); };
-    M.querySelectorAll('[data-cause]').forEach(s => s.onchange = async () => {
-      const v = s.value, aid = +s.dataset.cause;
-      const q = v ? sb.from('bar_causes').upsert({ comptage_id: cpt.id, article_id: aid, cause: v }, { onConflict: 'comptage_id,article_id' }) : sb.from('bar_causes').delete().eq('comptage_id', cpt.id).eq('article_id', aid);
+    const saveCause = async aid => {
+      const sel = M.querySelector(`[data-cause="${aid}"]`), note = M.querySelector(`[data-note="${aid}"]`).value.trim();
+      if (!sel.value && note) sel.value = 'Autre';
+      const q = sel.value ? sb.from('bar_causes').upsert({ comptage_id: cpt.id, article_id: aid, cause: sel.value, note: note || null }, { onConflict: 'comptage_id,article_id' })
+        : sb.from('bar_causes').delete().eq('comptage_id', cpt.id).eq('article_id', aid);
       const { error } = await q; C().toast(error ? 'Cause non enregistrée : ' + error.message : 'Cause enregistrée');
-    });
+    };
+    M.querySelectorAll('[data-cause]').forEach(s => s.onchange = () => saveCause(+s.dataset.cause));
+    M.querySelectorAll('[data-note]').forEach(i => { i.onchange = () => saveCause(+i.dataset.note); i.onkeydown = e => { if (e.key === 'Enter') i.blur(); }; });
   }
 
   /* ================= Ordinateur : calendrier ================= */
