@@ -47,7 +47,20 @@
   async function assurerTirage(date, forcer) {
     const { sb } = C();
     let { data: cpt } = await sb.from('bar_comptages').select('*').eq('date_jour', date).maybeSingle();
-    if (cpt && cpt.tirage_ok) return { comptage: cpt, articles: await lireTirage(date) };
+    if (cpt && cpt.tirage_ok) {
+      // Tirage fait avant l'import du stock du jour et rien encore saisi : on le refait, pour avoir la rotation et le recompte
+      if (!cpt.valide_le && !cpt.import_stock_id) {
+        const st = await stockDuJour(date);
+        const { data: dejà } = st ? await sb.from('bar_comptage_lignes').select('id').eq('comptage_id', cpt.id).limit(1) : { data: [1] };
+        if (st && !(dejà || []).length) {
+          await sb.from('bar_tirages').delete().eq('date_jour', date);
+          await calculerTirage(date, cpt);
+          const { data: c4 } = await sb.from('bar_comptages').update({ import_stock_id: st.id }).eq('id', cpt.id).select().single();
+          return { comptage: c4, articles: await lireTirage(date), refait: true };
+        }
+      }
+      return { comptage: cpt, articles: await lireTirage(date) };
+    }
     if (!cpt) {
       const cal = await calendrier(date, date);
       if (!forcer && !T.jourActif(date, cal)) return { inactif: true };
@@ -59,7 +72,8 @@
       cpt = ins[0];
     }
     await calculerTirage(date, cpt);
-    const { data: c3 } = await sb.from('bar_comptages').update({ tirage_ok: true }).eq('id', cpt.id).select().single();
+    const st0 = await stockDuJour(date);
+    const { data: c3 } = await sb.from('bar_comptages').update({ tirage_ok: true, import_stock_id: st0 ? st0.id : null }).eq('id', cpt.id).select().single();
     return { comptage: c3, articles: await lireTirage(date) };
   }
 
@@ -91,11 +105,11 @@
     // Dernier stock théorique importé (« Vendu » y est cumulé depuis le dernier inventaire Bizzon)
     const { data: imps } = await sb.from('bar_imports').select('id').eq('type', 'stock').order('exporte_le', { ascending: false }).limit(1);
     let lignes = [];
-    if (imps && imps[0]) { const { data } = await sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prevu,vendu').eq('import_id', imps[0].id).in('famille', [...fam]); lignes = data || []; }
+    if (imps && imps[0]) { const { data } = await sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prevu,vendu,prix').eq('import_id', imps[0].id).in('famille', [...fam]); lignes = data || []; }
     const ok = l => fam.has(l.famille) && /^1\.000 /.test(l.unite || '') && !exclus.has(l.nom_bizzon);
     let pool = lignes.filter(l => ok(l) && Number(l.vendu) > 0);
     if (pool.length < 15) pool = lignes.filter(l => ok(l) && (Number(l.vendu) > 0 || Number(l.prevu) > 0)); // peu de ventes : articles en stock
-    const rotation = pool.map(l => ({ nom_bizzon: l.nom_bizzon, poids: recontrole.includes(l.nom_bizzon) ? 4 : 1, l }));
+    const rotation = pool.map(l => ({ nom_bizzon: l.nom_bizzon, poids: Math.sqrt(1 + Math.max(0, Number(l.vendu) || 0) * (Number(l.prix) || 0)), l })); // gros volumes en valeur : tirés plus souvent
     const choix = T.tirerBar({ date, nBar: 8, prioritaires: prio, comptesSemaine: comptes, dernierComptage: dernier, joursActifsRestants: restants,
       recontrole, salsa, rotation, rng: T.rngDepuis(date) });
     // Articles de rotation ou de salsa pas encore connus : on les crée
@@ -358,15 +372,26 @@
     if (!cpts || !cpts.length) { M.innerHTML = `<div class="main-h"><div><h2>Écarts</h2><p>Aucun comptage pour l'instant.</p></div></div><div class="empty">Les écarts apparaîtront après le premier comptage sur téléphone.</div>`; return; }
     const cpt = cpts.find(c => c.id === selCpt) || cpts[0]; selCpt = cpt.id;
     const rows = await calculerEcarts(cpt.id);
+    // Écart au comptage précédent du même article : ce qui a bougé depuis (si Bizzon n'a pas été corrigé entre-temps)
+    const prev = {};
+    const ids = rows.map(r => r.article.id);
+    const { data: avant } = await sb.from('bar_tirages').select('date_jour,article_id').in('article_id', ids).lt('date_jour', cpt.date_jour).order('date_jour', { ascending: false }).limit(400);
+    const derniere = {}; (avant || []).forEach(t => { if (!derniere[t.article_id]) derniere[t.article_id] = t.date_jour; });
+    for (const d of [...new Set(Object.values(derniere))].slice(0, 12)) {
+      const c = cpts.find(x => x.date_jour === d && x.valide_le); if (!c) continue;
+      (await calculerEcarts(c.id)).forEach(r => { if (derniere[r.article.id] === d && r.e !== null) prev[r.article.id] = { e: r.e, d }; });
+    }
+    const varia = r => { const p = prev[r.article.id]; if (r.e === null) return '–'; if (!p) return '<span class="hint">1er comptage</span>';
+      const v = +(r.e - p.e).toFixed(3); return `<span class="${v < 0 ? 'neg' : ''}">${v > 0 ? '+' : ''}${fr(v, 3)}</span><div class="hint">vs ${Number(p.d.slice(8))}/${p.d.slice(5, 7)} (${p.e > 0 ? '+' : ''}${fr(p.e, 3)})</div>`; };
     const conf = rows.filter(r => r.statut === 'Écart confirmé' || r.statut === 'À recontrôler');
     const totEv = rows.reduce((s, r) => s + (r.ev || 0), 0);
     const pill = s => `<span class="pill ${s.startsWith('Conforme') ? 'p-ok' : s === 'Écart confirmé' ? 'p-bad' : s === 'À recontrôler' ? 'p-warn' : 'p-mute'}">${s}</span>`;
-    const grp = (lbl, list) => `<tr class="grp"><td colspan="9">${lbl}</td></tr>` + list.map(r => `<tr>
+    const grp = (lbl, list) => `<tr class="grp"><td colspan="10">${lbl}</td></tr>` + list.map(r => `<tr>
       <td>${esc(r.article.nom_court)}${r.article.motif === 'recontrole' ? ' <span class="pill p-warn">recontrôle</span>' : ''}</td>
       <td class="hint">${r.article.emplacements.map(e => `${COLS[e].slice(0, 3)}. ${r.qte[e] !== undefined ? fr(r.qte[e]) : '–'}`).join(' · ')}</td>
       <td class="n">${r.complet ? fr(r.total, 3) : '–'}</td><td class="n">${r.theo !== null ? fr(r.theo, 3) : '–'}</td><td class="n">${r.pertes ? fr(r.pertes) : '0'}</td>
       <td class="n ${r.e < 0 ? 'neg' : r.e > 0 ? 'pos' : ''}">${r.e === null ? '–' : (r.e > 0 ? '+' : '') + fr(r.e, 3) + ' ' + U[r.article.unite]}</td>
-      <td class="n ${r.ev < 0 ? 'neg' : ''}">${r.ev === null ? '–' : eur(r.ev)}</td><td>${pill(r.statut)}</td>
+      <td class="n ${r.ev < 0 ? 'neg' : ''}">${r.ev === null ? '–' : eur(r.ev)}</td><td class="n">${varia(r)}</td><td>${pill(r.statut)}</td>
       <td>${r.hors ? `<div class="cause"><select data-cause="${r.article.id}" aria-label="Cause"><option value="">Cause…</option>${CAUSES.concat(r.cause && !CAUSES.includes(r.cause.cause) ? [r.cause.cause] : []).map(c => `<option ${r.cause && r.cause.cause === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <input data-note="${r.article.id}" maxlength="200" placeholder="Précision (libre)…" aria-label="Précision sur la cause" value="${esc(r.cause && r.cause.note || '')}"></div>` : ''}</td></tr>`).join('');
     M.innerHTML = `<div class="main-h"><div><h2>Écarts</h2><p>Écart = compté − (théorique − pertes déclarées pas encore transférées dans Bizzon). Négatif = manque.</p></div>
@@ -377,10 +402,10 @@
         <div class="tile"><div class="k">Écart valorisé</div><div class="v ${totEv < 0 ? 'neg' : ''}">${eur(totEv)}</div><div class="s">prix unitaire Bizzon</div></div>
         <div class="tile"><div class="k">Stock théorique de référence</div><div class="v" style="font-size:16px;font-family:var(--body)">${rows.some(r => r.theo !== null) ? 'importé' : 'absent'}</div><div class="s">${rows.some(r => r.theo !== null) ? '' : 'Importe le stock du jour sur la page Aujourd’hui'}</div></div>
       </div>
-      <div class="tbl"><table class="t"><thead><tr><th>Article</th><th>Détail compté</th><th class="n">Compté</th><th class="n">Théorique</th><th class="n">Pertes décl.</th><th class="n">Écart</th><th class="n">Écart €</th><th>Statut</th><th>Cause</th></tr></thead><tbody>
+      <div class="tbl"><table class="t"><thead><tr><th>Article</th><th>Détail compté</th><th class="n">Compté</th><th class="n">Théorique</th><th class="n">Pertes décl.</th><th class="n">Écart</th><th class="n">Écart €</th><th class="n" title="Écart d'aujourd'hui moins écart au comptage précédent de cet article">Variation</th><th>Statut</th><th>Cause</th></tr></thead><tbody>
         ${grp('Bar', rows.filter(r => r.article.type !== 'canette'))}${grp('Canettes', rows.filter(r => r.article.type === 'canette'))}
       </tbody></table></div>
-      <span class="hint">« À recontrôler » : hors seuil sans recompte sur place (stock importé après le comptage) ; l'article sera recompté au prochain comptage. Seuils : 5 L, 0,2 bouteille, 1 canette, 0 pièce ou 10 €.</span>`;
+      <span class="hint">« À recontrôler » : hors seuil sans recompte sur place (stock importé après le comptage) ; l'article sera recompté au prochain comptage. Seuils : 5 L, 0,2 bouteille, 1 canette, 0 pièce ou 10 €. « Variation » : ce qui a bougé depuis le comptage précédent de l'article. Si l'écart revient à l'identique, c'est un ancien écart pas encore corrigé dans Bizzon, pas un nouveau problème.</span>`;
     M.querySelector('#cptSel').onchange = e => { selCpt = +e.target.value; ecarts(M); };
     const saveCause = async aid => {
       const sel = M.querySelector(`[data-cause="${aid}"]`), note = M.querySelector(`[data-note="${aid}"]`).value.trim();
@@ -446,5 +471,5 @@
     const g = el.querySelector('#goEc'); if (g) g.onclick = voirEcarts;
   }
 
-  window.BarViews = { phone, ecarts, calendrier: calendrierView, statutDuJour };
+  Object.assign(window.BarViews = window.BarViews || {}, { phone, ecarts, calendrier: calendrierView, statutDuJour });
 })();
