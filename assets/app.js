@@ -77,7 +77,7 @@
   ];
   function renderDesk() {
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 7</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 8</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button ${on ? 'aria-current="page"' : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -192,33 +192,57 @@
         </tbody></table></div><span class="hint">Les quantités comptées et les écarts s'afficheront ici dès que le comptage sur téléphone sera en place (prochaine étape).</span></div>`;
     }
 
-    // Ventes
-    if (!ve) { $('#ventes').innerHTML = `<div class="empty">Importe une Analyse des ventes pour voir le rapport de la veille.</div>`; return; }
-    const { data: vl } = await sb.from('bar_ventes').select('*').eq('import_id', ve.id);
-    const days = [...new Set((vl || []).map(l => l.date_vente))].sort();
-    const PV = [['BAR 1.13', 'Bar 1.13'], ['RESTAURANT 1.13', 'Restaurant 1.13'], ['M SHOP', 'Mshop']];
-    const synDay = d => BarImport.syntheseVentes((vl || []).filter(l => l.date_vente === d), R.exclusions_ventes);
+    // Ventes : navigation jour par jour sur tout l'historique importé
+    renderVentes(R, today);
+  }
+
+  async function renderVentes(R, today) {
+    const box = $('#ventes'); if (!box) return;
+    const { data: imps } = await sb.from('bar_imports').select('periode_debut').eq('type', 'ventes').order('periode_debut', { ascending: false }).limit(400);
+    const days = [...new Set((imps || []).map(i => i.periode_debut).filter(Boolean))].sort();
+    if (!days.length) { box.innerHTML = `<div class="empty">Importe une Analyse des ventes pour voir le rapport de la veille.</div>`; return; }
     const hier = new Date(Date.parse(today + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
     if (!selDay || !days.includes(selDay)) selDay = days.includes(hier) ? hier : days[days.length - 1];
+    const idx = days.indexOf(selDay);
+    const last7 = days.slice(-7);
+    const prevWeek = new Date(Date.parse(selDay + 'T12:00:00Z') - 7 * 864e5).toISOString().slice(0, 10);
+    const want = [...new Set([...last7, selDay, prevWeek])];
+    const { data: vl } = await sb.from('bar_ventes').select('date_vente,article,centre,point_vente,quantite,net_ht').in('date_vente', want).limit(20000);
+    const PV = [['BAR 1.13', 'Bar 1.13'], ['RESTAURANT 1.13', 'Restaurant 1.13'], ['M SHOP', 'Mshop']];
+    const synDay = d => BarImport.syntheseVentes((vl || []).filter(l => l.date_vente === d), R.exclusions_ventes);
     const tot = (syn, k) => syn.parPV[k] ? syn.parPV[k].total : 0;
-    const daysTbl = days.length > 1 ? `<div class="tbl"><table class="t"><thead><tr><th>Jour</th>${PV.map(p => `<th class="n">${p[1]}</th>`).join('')}<th class="n">Total des trois</th><th class="n">Hors périmètre</th></tr></thead><tbody>
-      ${days.map(d => { const sy = synDay(d); const t3 = PV.reduce((s, p) => s + tot(sy, p[0]), 0); const hp = Object.values(sy.horsPerimetre).reduce((a, b) => a + b, 0);
-        return `<tr data-day="${d}" style="cursor:pointer${d === selDay ? ';background:var(--brass-soft)' : ''}"><td>${fmtD(d)}</td>${PV.map(p => `<td class="n">${eur(tot(sy, p[0]))}</td>`).join('')}<td class="n"><b>${eur(t3)}</b></td><td class="n">${eur(hp)}</td></tr>`; }).join('')}
-      </tbody></table></div><span class="hint">Clique sur un jour pour voir son détail.</span>` : '';
-    const syn = synDay(selDay);
+    const t3 = sy => PV.reduce((s, p) => s + tot(sy, p[0]), 0);
+    const syn = synDay(selDay), synPW = days.includes(prevWeek) ? synDay(prevWeek) : null;
+    const evol = (a, b) => b ? `${a >= b ? '+' : ''}${fr((a - b) / b * 100, 1)} % vs ${fmtD(prevWeek).split(' ')[0]} précédent` : '';
     const others = Object.keys(syn.parPV).filter(k => !PV.some(p => p[0] === k));
     const bar = syn.parPV['BAR 1.13'];
     const top = bar ? Object.entries(bar.articles).sort((a, b) => b[1].net - a[1].net).slice(0, 8) : [];
     const maxTop = top.length ? top[0][1].net : 1;
-    $('#ventes').innerHTML = `<div class="card"><div class="main-h" style="align-items:center"><h3>Ventes${days.length > 1 ? ` du ${fmtD(days[0])} au ${fmtD(days[days.length - 1])}` : ''}</h3><span class="hint">CA net HT · source : Analyse des ventes</span></div>
-      ${daysTbl}
-      <h3 style="margin-top:6px">Détail du ${fmtD(selDay)}</h3>
-      <div class="tiles">${PV.map(([k, l]) => { const p = syn.parPV[k]; return `<div class="tile"><div class="k">${l}</div><div class="v">${eur(p ? p.total : 0)}</div><div class="s">${p ? Object.entries(p.centres).sort((a, b) => b[1] - a[1]).map(([c, v]) => `${esc(c.toLowerCase())} ${eur(v)}`).join(' · ') : 'aucune vente encaissée'}</div></div>`; }).join('')}</div>
+    const cap = d => { const x = fmtD(d); return x.charAt(0).toUpperCase() + x.slice(1); };
+    box.innerHTML = `<div class="card">
+      <div class="main-h" style="align-items:center"><h3>Ventes</h3><span class="hint">CA net HT · hors petit-déjeuner et banquet</span></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn ghost sm" id="dPrev" ${idx <= 0 ? 'disabled' : ''} aria-label="Jour précédent">‹ Jour précédent</button>
+        <select id="dSel" aria-label="Choisir le jour" style="font:inherit;font-weight:700;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)">
+          ${days.slice().reverse().map(d => `<option value="${d}" ${d === selDay ? 'selected' : ''}>${cap(d)}</option>`).join('')}</select>
+        <button class="btn ghost sm" id="dNext" ${idx >= days.length - 1 ? 'disabled' : ''} aria-label="Jour suivant">Jour suivant ›</button>
+        ${selDay === hier ? '<span class="pill p-ok">hier</span>' : ''}
+      </div>
+      <div class="tiles">${PV.map(([k, l]) => { const p = syn.parPV[k]; const v = p ? p.total : 0; const pw = synPW ? tot(synPW, k) : null;
+        return `<div class="tile"><div class="k">${l}</div><div class="v">${eur(v)}</div><div class="s">${p ? Object.entries(p.centres).sort((a, b) => b[1] - a[1]).map(([c, x]) => `${esc(c.toLowerCase())} ${eur(x)}`).join(' · ') : 'aucune vente encaissée'}</div>${pw ? `<div class="s">${evol(v, pw)}</div>` : ''}</div>`; }).join('')}
+        <div class="tile"><div class="k">Total des trois</div><div class="v">${eur(t3(syn))}</div>${synPW ? `<div class="s">${evol(t3(syn), t3(synPW))}</div>` : '<div class="s">comparaison dès qu\'il y a une semaine d\'historique</div>'}</div></div>
       ${others.length ? `<span class="hint">Autres points de vente : ${others.map(k => `${esc(k)} ${eur(syn.parPV[k].total)}`).join(' · ')}</span>` : ''}
       <span class="hint">Hors périmètre : ${Object.entries(syn.horsPerimetre).map(([k, v]) => `${esc(k.toLowerCase())} ${eur(v)}`).join(' · ') || 'rien'}.</span>
       ${top.length ? `<h3 style="margin-top:4px">Bar · articles les plus vendus</h3><div class="bars">${top.map(([n, a]) => `<div class="barrow"><span>${esc(n)}</span><div class="track"><i style="width:${Math.max(2, a.net / maxTop * 100)}%"></i></div><span class="v">${fr(a.q)} · ${eur(a.net)}</span></div>`).join('')}</div>` : ''}
+      ${last7.length > 1 ? `<h3 style="margin-top:6px">Les ${last7.length} derniers jours importés · clique sur un jour pour le détail</h3><div class="tbl"><table class="t"><thead><tr><th>Jour</th>${PV.map(p => `<th class="n">${p[1]}</th>`).join('')}<th class="n">Total des trois</th></tr></thead><tbody>
+        ${last7.slice().reverse().map(d => { const sy = synDay(d); return `<tr data-day="${d}" style="cursor:pointer${d === selDay ? ';background:var(--brass-soft)' : ''}"><td>${cap(d)}</td>${PV.map(p => `<td class="n">${eur(tot(sy, p[0]))}</td>`).join('')}<td class="n"><b>${eur(t3(sy))}</b></td></tr>`; }).join('')}
+      </tbody></table></div>` : ''}
     </div>`;
-    document.querySelectorAll('#ventes tr[data-day]').forEach(tr => tr.onclick = () => { selDay = tr.dataset.day; refreshToday(); });
+    const go = d => { selDay = d; renderVentes(R, today); };
+    $('#dPrev').onclick = () => go(days[idx - 1]);
+    $('#dNext').onclick = () => go(days[idx + 1]);
+    $('#dSel').onchange = e => go(e.target.value);
+    box.querySelectorAll('tr[data-day]').forEach(tr => tr.onclick = () => go(tr.dataset.day));
   }
 
   async function renderHist() {
