@@ -212,22 +212,29 @@
       <p class="hint" style="margin:0 4px">Touche une case : le pavé s'ouvre dessous, « Suivant » descend dans la colonne. Toute la réserve, puis le bar, puis le Mshop. Un emplacement vide se saisit 0.</p>
       <div class="ph-foot"><button class="btn brass" id="valider" ${f < t ? 'disabled' : ''}>${f < t ? `Encore ${t - f} case${t - f > 1 ? 's' : ''} à remplir` : P.phase === 'recount' ? 'Valider le recompte' : 'Valider le comptage'}</button></div>
       ${phFoot()}</div></div>`;
-    app.querySelectorAll('.cell[data-a]').forEach(b => b.onclick = async () => { if (P.cur) await commit(); P.cur = { a: +b.dataset.a, e: b.dataset.e }; P.buf = ''; P.kegN = 0; P.kegT = false; drawPhone(); scrollKp(); });
+    app.querySelectorAll('.cell[data-a]').forEach(b => b.onclick = async () => { if (P.cur) await commit(); P.cur = { a: +b.dataset.a, e: b.dataset.e }; P.buf = ''; P.kegN = 0; P.kegT = false; P.chip = false; drawPhone(); scrollKp(); });
     if (P.cur) bindKeypad();
     document.getElementById('valider').onclick = valider;
     bindFoot();
   }
 
+  const tailleFut = a => { const m = /(\d+)\s?L\b/i.exec(a.nom_bizzon); return m ? +m[1] : 20; };
   function keypad(a) {
-    const keg = a.unite === 'litres', btl = a.unite === 'bouteilles';
+    const keg = a.unite === 'litres', btl = a.unite === 'bouteilles', tf = tailleFut(a);
     const stored = cellsOf(a)[P.cur.e];
     let v = P.buf !== '' ? P.buf : fmtV(stored) === '–' ? '' : fmtV(stored);
     const partiel = num(P.buf);
-    if (keg && P.kegT) v = C().fr(P.kegN * 20 + partiel);
+    if (keg && P.kegT) v = C().fr(P.kegN * tf + partiel);
+    if (keg) return `<div class="kp" role="dialog" aria-label="Saisie ${C().esc(a.nom_court)}"><div class="kp-h"><div><small>${COLS[P.cur.e]} · litres</small><b>${C().esc(a.nom_court)}</b></div><button class="kp-x" data-kp="close">Fermer</button></div>
+      <div class="kp-disp">${v === '' ? '–' : v}<span>L</span></div>
+      <div class="kp-help">${P.kegT ? `${P.kegN} × ${tf} L + ${C().fr(partiel)} L entamé` : stored !== undefined && stored !== '' ? 'Déjà saisi. Touche un bouton pour recommencer.' : 'Deux étapes : les fûts pleins, puis les litres du fût entamé.'}</div>
+      <div class="kp-zone"><span>1 · Fûts pleins</span><div class="kp-step"><button data-kp="keg-" aria-label="Un fût plein de moins">−</button><b>${P.kegT ? P.kegN : 0}</b><button data-kp="keg+" aria-label="Un fût plein de plus">+</button></div></div>
+      <div class="kp-zone"><span>2 · Fût entamé (litres)</span><div class="kp-quick kp-q4">${[0, 5, 10, 15].filter(x => x < tf).map(x => `<button data-kp="p${x}" class="${P.kegT && P.buf === String(x) ? 'on' : ''}">${x} L</button>`).join('')}</div></div>
+      <div class="kp-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', '⌫'].map(k => `<button data-kp="k${k}">${k}</button>`).join('')}</div>
+      <button class="kp-next" data-kp="next">Suivant ›</button></div>`;
     return `<div class="kp" role="dialog" aria-label="Saisie ${C().esc(a.nom_court)}"><div class="kp-h"><div><small>${COLS[P.cur.e]} · ${a.unite}</small><b>${C().esc(a.nom_court)}</b></div><button class="kp-x" data-kp="close">Fermer</button></div>
       <div class="kp-disp">${v === '' ? '–' : v}<span>${U[a.unite]}</span></div>
       <div class="kp-help">${keg ? (P.kegT ? `${P.kegN} fût${P.kegN > 1 ? 's' : ''} plein${P.kegN > 1 ? 's' : ''} + ${C().fr(partiel)} L dans le fût entamé` : 'Ajoute les fûts pleins, puis tape les litres du fût entamé') : btl ? 'Bouteille entamée : touche le dixième' : ''}</div>
-      ${keg ? `<div class="kp-keg"><button data-kp="keg-">− 1 fût plein</button><button data-kp="keg+">+ 1 fût plein (20 L)</button></div>` : ''}
       ${btl ? `<div class="kp-quick">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(d => `<button data-kp="t${d}">,${d}</button>`).join('')}</div>` : ''}
       <div class="kp-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', btl || keg ? ',' : '', '0', '⌫'].map(k => k ? `<button data-kp="k${k}">${k}</button>` : '<span></span>').join('')}</div>
       <button class="kp-next" data-kp="next">Suivant ›</button></div>`;
@@ -243,9 +250,9 @@
   async function commit() {
     const a = curArt(); if (!a) return;
     let val = null;
-    if (a.unite === 'litres' && P.kegT) val = P.kegN * 20 + num(P.buf);
+    if (a.unite === 'litres' && P.kegT) val = P.kegN * tailleFut(a) + num(P.buf);
     else if (P.buf !== '') val = num(P.buf);
-    P.buf = ''; P.kegN = 0; P.kegT = false;
+    P.buf = ''; P.kegN = 0; P.kegT = false; P.chip = false;
     if (val === null) return;
     const rec = P.phase === 'recount';
     cellsOf(a)[P.cur.e] = String(val);
@@ -265,10 +272,11 @@
         return;
       }
       if (k === 'keg+' || k === 'keg-') { P.kegT = true; P.kegN = Math.max(0, P.kegN + (k === 'keg+' ? 1 : -1)); }
+      else if (k[0] === 'p') { P.kegT = true; P.buf = k.slice(1); P.chip = true; }
       else if (k[0] === 't') { const base = P.buf !== '' ? P.buf : (fmtV(cellsOf(a)[P.cur.e]) === '–' ? '' : fmtV(cellsOf(a)[P.cur.e])); const ip = Math.floor(num(base)); P.buf = k === 't0' ? String(ip) : ip + ',' + k[1]; }
       else {
         const key = k.slice(1);
-        if (a.unite === 'litres') P.kegT = true;
+        if (a.unite === 'litres') { P.kegT = true; if (P.chip) { P.buf = ''; P.chip = false; } }
         if (key === '⌫') P.buf = P.buf.slice(0, -1);
         else if (key === ',') P.buf = P.buf.includes(',') ? P.buf : (P.buf === '' ? '0,' : P.buf + ',');
         else P.buf = (P.buf === '0' ? '' : P.buf) + key;

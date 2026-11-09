@@ -177,3 +177,13 @@ details.arts[open] summary b::before{content:"▾ "}
 .cause{display:flex;flex-direction:column;gap:5px;min-width:190px}
 .cause select,.cause input{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
 .cause input::placeholder{color:var(--muted)}
+/* iPhone : pas de zoom au double-tap pendant la saisie */
+html,body,.ph,.ph button{touch-action:manipulation}
+.kp,.ctab{-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.kp-zone{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.05);border-radius:11px;padding:8px}
+.kp-zone>span{font-size:12px;font-weight:700;color:var(--brass)}
+.kp-step{display:grid;grid-template-columns:1fr 1.2fr 1fr;align-items:center;gap:6px}
+.kp-step button{background:var(--navy-2);border:1px solid rgba(255,255,255,.18);color:var(--on-navy);border-radius:10px;padding:10px 0;font:800 24px var(--mono);cursor:pointer}
+.kp-step b{text-align:center;font:800 28px var(--mono)}
+.kp-q4{grid-template-columns:repeat(4,1fr)}
+.kp-quick button.on{background:var(--brass);color:#1b1307}
