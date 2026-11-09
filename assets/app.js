@@ -77,7 +77,7 @@
   ];
   function renderDesk() {
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 5</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 6</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button ${on ? 'aria-current="page"' : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -93,7 +93,8 @@
       <div class="log" id="log"></div>
       <div class="imports" id="imports"></div>
       <div id="stock"></div>
-      <div id="ventes"></div>`;
+      <div id="ventes"></div>
+      <div id="hist"></div>`;
     const drop = $('#drop');
     ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
@@ -165,6 +166,7 @@
       sb.from('bar_reglages').select('*')
     ]);
     const st = lastStock && lastStock[0], ve = lastVentes && lastVentes[0];
+    renderHist();
     const R = Object.fromEntries((regl || []).map(r => [r.cle, r.valeur]));
     const today = todayParis();
     const stToday = st && new Date(st.exporte_le).toLocaleDateString('en-CA', { timeZone: TZ }) === today;
@@ -217,6 +219,25 @@
       ${top.length ? `<h3 style="margin-top:4px">Bar · articles les plus vendus</h3><div class="bars">${top.map(([n, a]) => `<div class="barrow"><span>${esc(n)}</span><div class="track"><i style="width:${Math.max(2, a.net / maxTop * 100)}%"></i></div><span class="v">${fr(a.q)} · ${eur(a.net)}</span></div>`).join('')}</div>` : ''}
     </div>`;
     document.querySelectorAll('#ventes tr[data-day]').forEach(tr => tr.onclick = () => { selDay = tr.dataset.day; refreshToday(); });
+  }
+
+  async function renderHist() {
+    const { data: imps } = await sb.from('bar_imports').select('*').order('importe_le', { ascending: false }).limit(20);
+    const el = $('#hist'); if (!el) return;
+    if (!imps || !imps.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `<div class="card"><h3>Historique des imports</h3><div class="tbl"><table class="t"><thead><tr><th>Type</th><th>Contenu</th><th class="n">Lignes</th><th>Fichier</th><th>Importé le</th><th></th></tr></thead><tbody>
+      ${imps.map(i => `<tr><td>${i.type === 'stock' ? 'Stock théorique' : 'Ventes'}</td>
+        <td>${i.type === 'stock' ? 'exporté le ' + fmtDT(i.exporte_le) : (i.periode_debut === i.periode_fin ? fmtD(i.periode_debut) : `<span class="pill p-bad">plusieurs jours : faux</span> ${i.periode_debut} → ${i.periode_fin}`)}</td>
+        <td class="n">${i.nb_lignes ?? '–'}</td><td class="hint">${esc(i.fichier || '')}</td><td>${fmtDT(i.importe_le)}</td>
+        <td><button class="btn ghost sm" data-del="${i.id}">Supprimer</button></td></tr>`).join('')}
+      </tbody></table></div><span class="hint">Supprimer un import efface aussi toutes ses lignes. Tu peux ensuite réimporter le bon fichier.</span></div>`;
+    el.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Confirmer la suppression'; b.classList.remove('ghost'); b.style.background = 'var(--bad)'; b.style.color = '#fff'; setTimeout(() => { if (b.isConnected && b.dataset.armed === '1') { b.dataset.armed = ''; b.textContent = 'Supprimer'; b.classList.add('ghost'); b.style.background = ''; b.style.color = ''; } }, 4000); return; }
+      b.disabled = true;
+      const { error } = await sb.from('bar_imports').delete().eq('id', b.dataset.del);
+      if (error) { toast('Suppression impossible : ' + error.message); b.disabled = false; return; }
+      toast('Import supprimé'); refreshToday();
+    });
   }
 
   sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') renderLogin(); });
