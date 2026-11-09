@@ -77,7 +77,7 @@
   ];
   function renderDesk() {
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 4</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 5</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button ${on ? 'aria-current="page"' : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -148,6 +148,10 @@
     try { await insertChunks('bar_ventes', res.lignes, imp.id); }
     catch (e) { await sb.from('bar_imports').delete().eq('id', imp.id); throw e; }
     if (old && old.length) await sb.from('bar_imports').delete().in('id', old.map(o => o.id));
+    // Nettoyage : les anciens imports sur plusieurs jours sont faux par construction (voir import.js)
+    const { data: multi } = await sb.from('bar_imports').select('id,periode_debut,periode_fin').eq('type', 'ventes');
+    const bad = (multi || []).filter(m => m.periode_debut !== m.periode_fin).map(m => m.id);
+    if (bad.length) await sb.from('bar_imports').delete().in('id', bad);
     await sb.from('bar_ventes').delete().gte('date_vente', res.periode.debut).lte('date_vente', res.periode.fin).neq('import_id', imp.id);
     const per = res.periode.debut === res.periode.fin ? `du ${fmtD(res.periode.debut)}` : `du ${res.periode.debut} au ${res.periode.fin}`;
     return `Ventes ${per} : ${res.lignes.length} lignes importées${old && old.length ? ' (import précédent remplacé)' : ''}.`;

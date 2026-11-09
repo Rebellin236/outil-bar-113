@@ -108,6 +108,11 @@
     }
     if (!lignes.length) throw new Error('Aucune ligne de vente trouvée dans ce fichier.');
     const dates = [...new Set(lignes.map(l => l.date_vente))].sort();
+    // Sur plusieurs jours, Bizzon cumule chaque article sur toute la période avec une seule date : les ventes par jour seraient fausses.
+    const per = parsePeriode(fichier);
+    if (dates.length > 1 || (per.debut && per.fin && per.debut !== per.fin)) {
+      throw new Error("Cet export couvre plusieurs jours. Sur une période, Bizzon additionne chaque article sans le répartir par jour, donc les chiffres seraient faux. Exporte une seule journée (celle d'hier) et réimporte.");
+    }
     return { type: 'ventes', periode: { debut: dates[0], fin: dates[dates.length - 1] }, lignes };
   }
 
