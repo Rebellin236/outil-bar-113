@@ -364,5 +364,34 @@
     M.querySelectorAll('[data-salsa]').forEach(b => b.onclick = () => { const d = b.dataset.salsa; save(d, { salsa: !(cal[d] && cal[d].salsa) }); });
   }
 
-  window.BarViews = { phone, ecarts, calendrier: calendrierView };
+  /* ================= Ordinateur : état du comptage du jour (page Aujourd'hui) ================= */
+  async function statutDuJour(el, voirEcarts) {
+    const { sb, todayParis, fmtDT, esc } = C();
+    const date = todayParis();
+    const { data: cpt } = await sb.from('bar_comptages').select('*').eq('date_jour', date).maybeSingle();
+    let titre, detail, cls = '', btn = false;
+    if (!cpt || !cpt.tirage_ok) {
+      const cal = await calendrier(date, date);
+      titre = T.jourActif(date, cal) ? 'Comptage du jour pas encore commencé' : 'Pas de comptage prévu aujourd’hui';
+      detail = T.jourActif(date, cal) ? 'Il se fait sur téléphone : ouvre l’app sur ton iPhone (ou celui de Christophe).' : 'Modifiable dans Réglages › Calendrier.';
+    } else {
+      const arts = await lireTirage(date);
+      const { data: lignes } = await sb.from('bar_comptage_lignes').select('article_id,emplacement').eq('comptage_id', cpt.id).eq('recompte', false);
+      const total = arts.reduce((s, a) => s + a.emplacements.length, 0), n = (lignes || []).length;
+      if (cpt.valide_le) {
+        const rows = await calculerEcarts(cpt.id);
+        const hors = rows.filter(r => r.hors);
+        cls = hors.length ? 'old' : 'ok'; btn = true;
+        titre = `Comptage validé à ${fmtDT(cpt.valide_le).split(' à ')[1]}`;
+        detail = `${arts.length} articles · ${(cpt.recompte_ids || []).length} recompté(s) sur place · ` + (hors.length ? `<b>${hors.length} écart${hors.length > 1 ? 's' : ''} hors seuil</b> : ${hors.map(r => esc(r.article.nom_court)).join(', ')}` : 'aucun écart hors seuil');
+      } else {
+        titre = (cpt.recompte_ids || []).length ? 'Recompte en cours sur téléphone' : 'Comptage en cours sur téléphone';
+        detail = `${Math.min(n, total)} case${n > 1 ? 's' : ''} sur ${total} saisie${n > 1 ? 's' : ''}.`;
+      }
+    }
+    el.innerHTML = `<div class="imp ${cls}" style="margin-top:-6px"><span class="dot"></span><div style="flex:1"><div class="k">${titre}</div><div class="hint">${detail}</div></div>${btn ? '<button class="btn sm" id="goEc">Voir les écarts</button>' : ''}</div>`;
+    const g = el.querySelector('#goEc'); if (g) g.onclick = voirEcarts;
+  }
+
+  window.BarViews = { phone, ecarts, calendrier: calendrierView, statutDuJour };
 })();

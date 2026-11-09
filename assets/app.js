@@ -74,7 +74,7 @@
 
   /* ---------------- Poste (admin) ---------------- */
   const NAV = [
-    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts', true], ['comptage', 'Comptage du jour', true], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['week', 'Synthèse du lundi']]],
+    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts', true], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['week', 'Synthèse du lundi']]],
     ['Équipe', [['pertes', 'Pertes'], ['taches', 'Tâches']]],
     ['Réglages', [['rot', 'Rotation Bar'], ['cal', 'Calendrier', true], ['seuils', 'Seuils et alertes'], ['dlc', 'Durées après ouverture']]]
   ];
@@ -82,13 +82,12 @@
   function renderDesk(sec) {
     if (sec) section = sec;
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 13</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 14</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button data-sec="${k}" ${on ? (k === section ? 'aria-current="page"' : '') : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
     $('#out').onclick = logout;
     app.querySelectorAll('[data-sec]').forEach(b => { if (!b.disabled) b.onclick = () => {
-      if (b.dataset.sec === 'comptage') { location.hash = 'comptage'; return window.BarViews.phone(app); }
       renderDesk(b.dataset.sec); }; });
     if (section === 'ecarts') return window.BarViews.ecarts($('#main'));
     if (section === 'cal') return window.BarViews.calendrier($('#main'));
@@ -102,6 +101,7 @@
       <span class="btn">Choisir les fichiers</span><input id="files" type="file" accept=".xlsx,.xls" multiple hidden></label>
       <div class="log" id="log"></div>
       <div class="imports" id="imports"></div>
+      <div id="cpt"></div>
       <div id="stock"></div>
       <div id="ventes"></div>
       <div id="hist"></div>`;
@@ -178,6 +178,7 @@
     ]);
     const st = lastStock && lastStock[0], ve = lastVentes && lastVentes[0];
     renderHist();
+    window.BarViews.statutDuJour($('#cpt'), () => renderDesk('ecarts'));
     const R = Object.fromEntries((regl || []).map(r => [r.cle, r.valeur]));
     const today = todayParis();
     const stToday = st && new Date(st.exporte_le).toLocaleDateString('en-CA', { timeZone: TZ }) === today;
@@ -200,7 +201,7 @@
           const l = byN[a.nom_bizzon];
           return `<tr><td>${esc(a.nom_court)}</td>${l ? `<td class="n">${fr(l.prevu, 3)} ${UNIT(l.unite)}</td><td class="n">${eur(l.prix)}</td><td class="n">${eur(l.valeur)}</td><td class="n">${fr(l.vendu, 3)}</td>` : '<td colspan="4"><span class="pill p-warn">introuvable dans l’export</span></td>'}<td>${a.type === 'canette' ? 'tous les jours' : a.freq_semaine + ' fois / semaine'}</td></tr>`;
         }).join('')).join('')}
-        </tbody></table></div><span class="hint">Les quantités comptées et les écarts s'afficheront ici dès que le comptage sur téléphone sera en place (prochaine étape).</span></div>`;
+        </tbody></table></div></div>`;
     }
 
     // Ventes : navigation jour par jour sur tout l'historique importé
