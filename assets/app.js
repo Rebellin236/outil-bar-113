@@ -77,7 +77,7 @@
   ];
   function renderDesk() {
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 10</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 9</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button ${on ? 'aria-current="page"' : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -88,7 +88,7 @@
   async function renderToday() {
     const M = $('#main');
     M.innerHTML = `<div class="main-h"><div><h2>${(d=>d.charAt(0).toUpperCase()+d.slice(1))(fmtD(todayParis()))}</h2><p>Dépose les exports Bizzon du matin, avant le comptage.</p></div></div>
-      <label class="drop" id="drop" for="files"><div class="f"><b>Exports Bizzon</b><span class="hint">Glisse ici le Stock théorique et l'Analyse des ventes (fichiers Excel), ou clique pour les choisir. L'app reconnaît chaque fichier toute seule. L'export « Produits à vendre » s'importe ici aussi, pour les taux de TVA.</span></div>
+      <label class="drop" id="drop" for="files"><div class="f"><b>Exports Bizzon</b><span class="hint">Glisse ici le Stock théorique et l'Analyse des ventes (fichiers Excel), ou clique pour les choisir. L'app reconnaît chaque fichier toute seule.</span></div>
       <span class="btn">Choisir les fichiers</span><input id="files" type="file" accept=".xlsx,.xls" multiple hidden></label>
       <div class="log" id="log"></div>
       <div class="imports" id="imports"></div>
@@ -112,8 +112,7 @@
         const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
         const type = BarImport.detectType(wb);
         if (!type) throw new Error("Fichier non reconnu : ni Stock théorique, ni Analyse des ventes.");
-        const res = type === 'stock' ? BarImport.parseStock(XLSX, wb, f.name) : type === 'ventes' ? BarImport.parseVentes(XLSX, wb, f.name) : BarImport.parseProduits(XLSX, wb);
-        if (type === 'ventes') selDay = res.periode.debut;   // on affiche directement le jour importé
+        const res = type === 'stock' ? BarImport.parseStock(XLSX, wb, f.name) : BarImport.parseVentes(XLSX, wb, f.name);
         const msg = await saveImport(res, f.name);
         line.className = 'ok'; line.textContent = msg;
       } catch (e) {
@@ -132,13 +131,6 @@
   }
 
   async function saveImport(res, fichier) {
-    if (res.type === 'produits') {
-      for (let i = 0; i < res.lignes.length; i += 500) {
-        const { error } = await sb.from('bar_produits_vente').upsert(res.lignes.slice(i, i + 500).map(l => ({ ...l, maj_le: new Date().toISOString() })), { onConflict: 'nom' });
-        if (error) throw new Error(/relation|does not exist/.test(error.message) ? "La table des produits n'existe pas encore : lance le script SQL 02 dans Supabase." : error.message);
-      }
-      return `Produits à vendre : ${res.lignes.length} produits et leur taux de TVA enregistrés. Le CA TTC est maintenant exact.`;
-    }
     if (res.type === 'stock') {
       if (!res.exporte) throw new Error("Heure d'export introuvable dans le fichier.");
       const exp = parisToUTC(res.exporte.iso);
@@ -215,17 +207,11 @@
     const last7 = days.slice(-7);
     const prevWeek = new Date(Date.parse(selDay + 'T12:00:00Z') - 7 * 864e5).toISOString().slice(0, 10);
     const want = [...new Set([...last7, selDay, prevWeek])];
-    const [{ data: vl }, { data: prods }] = await Promise.all([
-      sb.from('bar_ventes').select('date_vente,article,groupe,famille,sous_famille,centre,point_vente,quantite,net_ht').in('date_vente', want).limit(20000),
-      sb.from('bar_produits_vente').select('nom,tva').limit(5000)
-    ]);
-    const tvaMap = new Map((prods || []).map(p => [p.nom.toLowerCase(), Number(p.tva)]));
+    const { data: vl } = await sb.from('bar_ventes').select('date_vente,article,centre,point_vente,quantite,net_ht').in('date_vente', want).limit(20000);
     const PV = [['BAR 1.13', 'Bar 1.13'], ['RESTAURANT 1.13', 'Restaurant 1.13'], ['M SHOP', 'Mshop']];
-    const synDay = d => BarImport.syntheseVentes((vl || []).filter(l => l.date_vente === d), R.exclusions_ventes, tvaMap.size ? tvaMap : null);
+    const synDay = d => BarImport.syntheseVentes((vl || []).filter(l => l.date_vente === d), R.exclusions_ventes);
     const tot = (syn, k) => syn.parPV[k] ? syn.parPV[k].total : 0;
-    const totT = (syn, k) => syn.parPV[k] ? syn.parPV[k].ttc : 0;
     const t3 = sy => PV.reduce((s, p) => s + tot(sy, p[0]), 0);
-    const t3T = sy => PV.reduce((s, p) => s + totT(sy, p[0]), 0);
     const syn = synDay(selDay), synPW = days.includes(prevWeek) ? synDay(prevWeek) : null;
     const evol = (a, b) => b ? `${a >= b ? '+' : ''}${fr((a - b) / b * 100, 1)} % vs ${fmtD(prevWeek).split(' ')[0]} précédent` : '';
     const others = Object.keys(syn.parPV).filter(k => !PV.some(p => p[0] === k));
@@ -236,12 +222,11 @@
     const missing = [];
     for (let k = 7; k >= 1; k--) { const d = new Date(Date.parse(today + 'T12:00:00Z') - k * 864e5).toISOString().slice(0, 10); if (!days.includes(d)) missing.push(d); }
     const allArts = PV.map(([k, l]) => { const p = syn.parPV[k]; const rows = p ? Object.entries(p.articles).sort((a, b) => b[1].net - a[1].net) : [];
-      return `<details class="arts" ${k === 'BAR 1.13' ? 'open' : ''}><summary><b>${l}</b><span class="hint">${rows.length} article${rows.length > 1 ? 's' : ''} · ${eur(p ? p.total : 0)} HT · ${eur(p ? p.ttc : 0)} TTC</span></summary>
-        ${rows.length ? `<div class="tbl"><table class="t"><thead><tr><th>Article vendu</th><th class="n">Quantité</th><th class="n">CA HT</th><th class="n">CA TTC</th><th class="n">Part</th></tr></thead><tbody>
-        ${rows.map(([n, a]) => `<tr><td>${esc(n)}</td><td class="n">${fr(a.q)}</td><td class="n">${eur(a.net)}</td><td class="n">${eur(a.ttc)}</td><td class="n">${p.total ? fr(a.net / p.total * 100, 1) + ' %' : '–'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint" style="margin:8px 0">Aucune vente.</p>'}</details>`; }).join('');
+      return `<details class="arts" ${k === 'BAR 1.13' ? 'open' : ''}><summary><b>${l}</b><span class="hint">${rows.length} article${rows.length > 1 ? 's' : ''} · ${eur(p ? p.total : 0)}</span></summary>
+        ${rows.length ? `<div class="tbl"><table class="t"><thead><tr><th>Article vendu</th><th class="n">Quantité</th><th class="n">CA HT</th><th class="n">Part</th></tr></thead><tbody>
+        ${rows.map(([n, a]) => `<tr><td>${esc(n)}</td><td class="n">${fr(a.q)}</td><td class="n">${eur(a.net)}</td><td class="n">${p.total ? fr(a.net / p.total * 100, 1) + ' %' : '–'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint" style="margin:8px 0">Aucune vente.</p>'}</details>`; }).join('');
     box.innerHTML = `<div class="card">
-      <div class="main-h" style="align-items:center"><h3>Ventes</h3><span class="hint">CA HT en grand, TTC en dessous · hors petit-déjeuner et banquet</span></div>
-      ${syn.estimes ? `<div class="err" style="background:var(--warn-soft);color:var(--warn)">TVA estimée par famille pour ${syn.estimes} ligne${syn.estimes > 1 ? 's' : ''} : le TTC est approximatif. Glisse l'export « Produits à vendre » de Bizzon pour un TTC exact.</div>` : ''}
+      <div class="main-h" style="align-items:center"><h3>Ventes</h3><span class="hint">CA net HT · hors petit-déjeuner et banquet</span></div>
       ${missing.length ? `<div class="err" style="background:var(--warn-soft);color:var(--warn)"><b>Ventes manquantes :</b> ${missing.map(cap).join(', ')}. Exporte chacun de ces jours (date de début = le jour, date de fin = le lendemain) et glisse les fichiers ensemble.</div>` : ''}
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn ghost sm" id="dPrev" ${idx <= 0 ? 'disabled' : ''} aria-label="Jour précédent">‹ Jour précédent</button>
@@ -251,14 +236,14 @@
         ${selDay === hier ? '<span class="pill p-ok">hier</span>' : ''}
       </div>
       <div class="tiles">${PV.map(([k, l]) => { const p = syn.parPV[k]; const v = p ? p.total : 0; const pw = synPW ? tot(synPW, k) : null;
-        return `<div class="tile"><div class="k">${l}</div><div class="v">${eur(v)}</div><div class="s"><b>${eur(p ? p.ttc : 0)} TTC</b></div><div class="s">${p ? Object.entries(p.centres).sort((a, b) => b[1] - a[1]).map(([c, x]) => `${esc(c.toLowerCase())} ${eur(x)}`).join(' · ') : 'aucune vente encaissée'}</div>${pw ? `<div class="s">${evol(v, pw)}</div>` : ''}</div>`; }).join('')}
-        <div class="tile"><div class="k">Total des trois</div><div class="v">${eur(t3(syn))}</div><div class="s"><b>${eur(t3T(syn))} TTC</b></div>${synPW ? `<div class="s">${evol(t3(syn), t3(synPW))}</div>` : '<div class="s">comparaison dès qu\'il y a une semaine d\'historique</div>'}</div></div>
+        return `<div class="tile"><div class="k">${l}</div><div class="v">${eur(v)}</div><div class="s">${p ? Object.entries(p.centres).sort((a, b) => b[1] - a[1]).map(([c, x]) => `${esc(c.toLowerCase())} ${eur(x)}`).join(' · ') : 'aucune vente encaissée'}</div>${pw ? `<div class="s">${evol(v, pw)}</div>` : ''}</div>`; }).join('')}
+        <div class="tile"><div class="k">Total des trois</div><div class="v">${eur(t3(syn))}</div>${synPW ? `<div class="s">${evol(t3(syn), t3(synPW))}</div>` : '<div class="s">comparaison dès qu\'il y a une semaine d\'historique</div>'}</div></div>
       ${others.length ? `<span class="hint">Autres points de vente : ${others.map(k => `${esc(k)} ${eur(syn.parPV[k].total)}`).join(' · ')}</span>` : ''}
-      <span class="hint">Hors périmètre : ${Object.entries(syn.horsPerimetre).map(([k, v]) => `${esc(k.toLowerCase())} ${eur(v)} HT (${eur(syn.horsPerimetreTTC[k])} TTC)`).join(' · ') || 'rien'}.</span>
+      <span class="hint">Hors périmètre : ${Object.entries(syn.horsPerimetre).map(([k, v]) => `${esc(k.toLowerCase())} ${eur(v)}`).join(' · ') || 'rien'}.</span>
       ${top.length ? `<h3 style="margin-top:4px">Bar · articles les plus vendus</h3><div class="bars">${top.map(([n, a]) => `<div class="barrow"><span>${esc(n)}</span><div class="track"><i style="width:${Math.max(2, a.net / maxTop * 100)}%"></i></div><span class="v">${fr(a.q)} · ${eur(a.net)}</span></div>`).join('')}</div>` : ''}
       <h3 style="margin-top:6px">Tous les articles vendus · ${cap(selDay)}</h3>${allArts}
-      ${last7.length > 1 ? `<h3 style="margin-top:6px">Les ${last7.length} derniers jours importés · clique sur un jour pour le détail</h3><div class="tbl"><table class="t"><thead><tr><th>Jour</th>${PV.map(p => `<th class="n">${p[1]}</th>`).join('')}<th class="n">Total HT</th><th class="n">Total TTC</th></tr></thead><tbody>
-        ${last7.slice().reverse().map(d => { const sy = synDay(d); return `<tr data-day="${d}" style="cursor:pointer${d === selDay ? ';background:var(--brass-soft)' : ''}"><td>${cap(d)}</td>${PV.map(p => `<td class="n">${eur(tot(sy, p[0]))}</td>`).join('')}<td class="n"><b>${eur(t3(sy))}</b></td><td class="n">${eur(t3T(sy))}</td></tr>`; }).join('')}
+      ${last7.length > 1 ? `<h3 style="margin-top:6px">Les ${last7.length} derniers jours importés · clique sur un jour pour le détail</h3><div class="tbl"><table class="t"><thead><tr><th>Jour</th>${PV.map(p => `<th class="n">${p[1]}</th>`).join('')}<th class="n">Total des trois</th></tr></thead><tbody>
+        ${last7.slice().reverse().map(d => { const sy = synDay(d); return `<tr data-day="${d}" style="cursor:pointer${d === selDay ? ';background:var(--brass-soft)' : ''}"><td>${cap(d)}</td>${PV.map(p => `<td class="n">${eur(tot(sy, p[0]))}</td>`).join('')}<td class="n"><b>${eur(t3(sy))}</b></td></tr>`; }).join('')}
       </tbody></table></div>` : ''}
     </div>`;
     const go = d => { selDay = d; renderVentes(R, today); };

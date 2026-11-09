@@ -25,7 +25,6 @@
   function detectType(wb) {
     if (wb.SheetNames.includes('ECONOMAT GENERAL')) return 'stock';
     if (wb.SheetNames.some(n => /analyse des ventes/i.test(n))) return 'ventes';
-    if (wb.SheetNames.includes('Produits')) return 'produits';
     return null;
   }
 
@@ -123,61 +122,28 @@
     return { type: 'ventes', periode: { debut: jour, fin: jour }, lignes };
   }
 
-  // Export « Produits à vendre » : nom et taux de TVA de chaque produit
-  function parseProduits(XLSX, wb) {
-    const a = rows(XLSX, wb.Sheets['Produits']);
-    const h = a[0] || [];
-    const c = n => h.indexOf(n);
-    const C = { nom: c('Product name'), cat: c('Product category'), tax: c('Sale tax'), fam: c('Sold product family'), sf: c('Sold product subfamily') };
-    if (C.nom < 0 || C.tax < 0) throw new Error("Colonnes « Product name » ou « Sale tax » introuvables : ce n'est pas un export Produits à vendre.");
-    const taux = t => { const m = /tva_(\d+)/.exec(String(t || '')); return m ? Number(m[1]) / 10000 : null; };
-    const out = new Map();
-    for (const r of a.slice(1)) {
-      if (!r || !r[C.nom] || taux(r[C.tax]) === null) continue;
-      out.set(String(r[C.nom]).trim(), { nom: String(r[C.nom]).trim(), tva: taux(r[C.tax]), categorie: r[C.cat], famille: r[C.fam], sous_famille: r[C.sf] });
-    }
-    if (!out.size) throw new Error('Aucun produit avec un taux de TVA trouvé dans ce fichier.');
-    return { type: 'produits', lignes: [...out.values()] };
-  }
-
-  // Taux de TVA d'un article vendu : nom exact, sinon nom avant « : » (variante), sinon estimation par famille
-  function tauxTVA(l, tvaMap) {
-    if (tvaMap) {
-      const n = String(l.article).trim().toLowerCase();
-      if (tvaMap.has(n)) return { t: tvaMap.get(n), estime: false };
-      const base = n.split(':')[0].trim();
-      if (tvaMap.has(base)) return { t: tvaMap.get(base), estime: false };
-    }
-    const alcool = /alcool|bi[eè]re|vin|champagne|cocktail alcool|ap[ée]ritif/i.test(`${l.famille || ''} ${l.sous_famille || ''}`) && !/sans alcool/i.test(`${l.famille || ''} ${l.sous_famille || ''}`);
-    return { t: l.groupe === 'Non alimentaire' ? 0.2 : (alcool ? 0.2 : 0.1), estime: true };
-  }
-
   // Synthèse des ventes d'une journée : par point de vente, hors exclusions (petit-déjeuner, banquet)
-  function syntheseVentes(lignes, excl, tvaMap) {
+  function syntheseVentes(lignes, excl) {
     const exC = new Set((excl && excl.centres) || []), exP = new Set((excl && excl.points_vente) || []);
     const garde = lignes.filter(l => !exC.has(l.centre) && !exP.has(l.point_vente));
     const exclu = lignes.filter(l => exC.has(l.centre) || exP.has(l.point_vente));
-    const parPV = {}; let estimes = 0;
-    const ttcOf = l => { const r = tauxTVA(l, tvaMap); if (r.estime) estimes++; return (l.net_ht || 0) * (1 + r.t); };
+    const parPV = {};
     for (const l of garde) {
-      const ttc = ttcOf(l);
-      const p = parPV[l.point_vente] || (parPV[l.point_vente] = { total: 0, ttc: 0, centres: {}, centresTTC: {}, articles: {} });
-      p.total += l.net_ht || 0; p.ttc += ttc;
+      const p = parPV[l.point_vente] || (parPV[l.point_vente] = { total: 0, centres: {}, articles: {} });
+      p.total += l.net_ht || 0;
       p.centres[l.centre] = (p.centres[l.centre] || 0) + (l.net_ht || 0);
-      p.centresTTC[l.centre] = (p.centresTTC[l.centre] || 0) + ttc;
-      const a = p.articles[l.article] || (p.articles[l.article] = { q: 0, net: 0, ttc: 0 });
-      a.q += l.quantite || 0; a.net += l.net_ht || 0; a.ttc += ttc;
+      const a = p.articles[l.article] || (p.articles[l.article] = { q: 0, net: 0 });
+      a.q += l.quantite || 0; a.net += l.net_ht || 0;
     }
-    const horsPerimetre = {}, horsPerimetreTTC = {};
+    const horsPerimetre = {};
     for (const l of exclu) {
       const k = exC.has(l.centre) ? l.centre : l.point_vente;
       horsPerimetre[k] = (horsPerimetre[k] || 0) + (l.net_ht || 0);
-      horsPerimetreTTC[k] = (horsPerimetreTTC[k] || 0) + ttcOf(l);
     }
-    return { parPV, horsPerimetre, horsPerimetreTTC, estimes };
+    return { parPV, horsPerimetre };
   }
 
-  const api = { detectType, parseStock, parseVentes, parseProduits, tauxTVA, syntheseVentes, parseExportDate, parsePeriode };
+  const api = { detectType, parseStock, parseVentes, syntheseVentes, parseExportDate, parsePeriode };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BarImport = api;
 })(typeof window !== 'undefined' ? window : globalThis);
