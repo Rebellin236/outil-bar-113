@@ -65,12 +65,12 @@
   }
 
   // Écart d'un article : compté − (théorique − pertes déclarées non reportées). Négatif = manque.
-  function ecart(compte, theo, pertes, prix, unite, seuils) {
+  function ecart(compte, theo, pertes, prix, unite, seuils, type) {
     if (theo === null || theo === undefined) return { e: null, ev: null, hors: false };
     const e = +(compte - (theo - (pertes || 0))).toFixed(3);
     const ev = prix ? +(e * prix).toFixed(2) : 0;
     const s = seuils || {};
-    const sq = unite === 'litres' ? (s.litres ?? 5) : unite === 'bouteilles' ? (s.bouteilles ?? 0.2) : (s.pieces ?? 0);
+    const sq = type === 'canette' ? (s.canettes ?? 1) : unite === 'litres' ? (s.litres ?? 5) : unite === 'bouteilles' ? (s.bouteilles ?? 0.2) : (s.pieces ?? 0);
     const hors = Math.abs(e) > sq + 1e-9 || Math.abs(ev) > (s.euros ?? 10) + 1e-9;
     return { e, ev, hors };
   }

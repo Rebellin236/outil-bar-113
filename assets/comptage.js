@@ -134,7 +134,7 @@
       const complet = a.emplacements.every(e => qte[e] !== undefined);
       const total = a.emplacements.reduce((s, e) => s + (qte[e] || 0), 0);
       const t = th[a.nom_bizzon];
-      const r = complet && t ? T.ecart(total, Number(t.prevu), pertes[a.nom_bizzon] || 0, Number(t.prix), a.unite, R.seuils) : { e: null, ev: null, hors: false };
+      const r = complet && t ? T.ecart(total, Number(t.prevu), pertes[a.nom_bizzon] || 0, Number(t.prix), a.unite, R.seuils, a.type) : { e: null, ev: null, hors: false };
       let statut = !complet ? 'Non compté' : !t ? 'Théorique absent' : r.hors ? (rc ? 'Écart confirmé' : 'À recontrôler') : (rc ? 'Conforme après recompte' : 'Conforme');
       return { article: a, qte, total, complet, theo: t ? Number(t.prevu) : null, prix: t ? Number(t.prix) : null, pertes: pertes[a.nom_bizzon] || 0, ...r, rc, statut, cause: causeBy[a.id] };
     });
@@ -335,7 +335,7 @@
       const R = await reglages();
       const th = await theoriques(P.stock.id, P.articles.map(a => a.nom_bizzon));
       const pertes = await pertesEnCours(P.articles.map(a => a.nom_bizzon), new Date().toISOString());
-      const hors = P.articles.filter(a => { const t = th[a.nom_bizzon]; return t && T.ecart(totalOf(a), Number(t.prevu), pertes[a.nom_bizzon] || 0, Number(t.prix), a.unite, R.seuils).hors; }).map(a => a.id);
+      const hors = P.articles.filter(a => { const t = th[a.nom_bizzon]; return t && T.ecart(totalOf(a), Number(t.prevu), pertes[a.nom_bizzon] || 0, Number(t.prix), a.unite, R.seuils, a.type).hors; }).map(a => a.id);
       if (hors.length) {
         const { data } = await sb.from('bar_comptages').update({ recompte_ids: hors, import_stock_id: P.stock.id }).eq('id', P.comptage.id).select().single();
         P.comptage = data; P.phase = 'recount';
@@ -380,7 +380,7 @@
       <div class="tbl"><table class="t"><thead><tr><th>Article</th><th>Détail compté</th><th class="n">Compté</th><th class="n">Théorique</th><th class="n">Pertes décl.</th><th class="n">Écart</th><th class="n">Écart €</th><th>Statut</th><th>Cause</th></tr></thead><tbody>
         ${grp('Bar', rows.filter(r => r.article.type !== 'canette'))}${grp('Canettes', rows.filter(r => r.article.type === 'canette'))}
       </tbody></table></div>
-      <span class="hint">« À recontrôler » : hors seuil sans recompte sur place (stock importé après le comptage) ; l'article sera recompté au prochain comptage. Seuils : 5 L, 0,2 bouteille, 0 pièce ou 10 €.</span>`;
+      <span class="hint">« À recontrôler » : hors seuil sans recompte sur place (stock importé après le comptage) ; l'article sera recompté au prochain comptage. Seuils : 5 L, 0,2 bouteille, 1 canette, 0 pièce ou 10 €.</span>`;
     M.querySelector('#cptSel').onchange = e => { selCpt = +e.target.value; ecarts(M); };
     const saveCause = async aid => {
       const sel = M.querySelector(`[data-cause="${aid}"]`), note = M.querySelector(`[data-note="${aid}"]`).value.trim();
