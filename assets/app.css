@@ -95,3 +95,10 @@ table.t{border-collapse:collapse;width:100%;font-size:14px}
 .center{min-height:100%;display:grid;place-items:center;padding:24px;text-align:center}
 .toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--navy);color:var(--on-navy);padding:11px 18px;border-radius:12px;font-weight:600;font-size:14px;z-index:60}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+details.arts{border:1px solid var(--line);border-radius:14px;padding:4px 14px;background:var(--surface)}
+details.arts[open]{padding-bottom:12px}
+details.arts summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;padding:10px 0;list-style:none}
+details.arts summary::-webkit-details-marker{display:none}
+details.arts summary b::before{content:"▸ ";color:var(--brass)}
+details.arts[open] summary b::before{content:"▾ "}

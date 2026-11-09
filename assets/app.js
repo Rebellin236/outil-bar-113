@@ -77,7 +77,7 @@
   ];
   function renderDesk() {
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 8</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 9</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button ${on ? 'aria-current="page"' : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -219,8 +219,15 @@
     const top = bar ? Object.entries(bar.articles).sort((a, b) => b[1].net - a[1].net).slice(0, 8) : [];
     const maxTop = top.length ? top[0][1].net : 1;
     const cap = d => { const x = fmtD(d); return x.charAt(0).toUpperCase() + x.slice(1); };
+    const missing = [];
+    for (let k = 7; k >= 1; k--) { const d = new Date(Date.parse(today + 'T12:00:00Z') - k * 864e5).toISOString().slice(0, 10); if (!days.includes(d)) missing.push(d); }
+    const allArts = PV.map(([k, l]) => { const p = syn.parPV[k]; const rows = p ? Object.entries(p.articles).sort((a, b) => b[1].net - a[1].net) : [];
+      return `<details class="arts" ${k === 'BAR 1.13' ? 'open' : ''}><summary><b>${l}</b><span class="hint">${rows.length} article${rows.length > 1 ? 's' : ''} · ${eur(p ? p.total : 0)}</span></summary>
+        ${rows.length ? `<div class="tbl"><table class="t"><thead><tr><th>Article vendu</th><th class="n">Quantité</th><th class="n">CA HT</th><th class="n">Part</th></tr></thead><tbody>
+        ${rows.map(([n, a]) => `<tr><td>${esc(n)}</td><td class="n">${fr(a.q)}</td><td class="n">${eur(a.net)}</td><td class="n">${p.total ? fr(a.net / p.total * 100, 1) + ' %' : '–'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint" style="margin:8px 0">Aucune vente.</p>'}</details>`; }).join('');
     box.innerHTML = `<div class="card">
       <div class="main-h" style="align-items:center"><h3>Ventes</h3><span class="hint">CA net HT · hors petit-déjeuner et banquet</span></div>
+      ${missing.length ? `<div class="err" style="background:var(--warn-soft);color:var(--warn)"><b>Ventes manquantes :</b> ${missing.map(cap).join(', ')}. Exporte chacun de ces jours (date de début = le jour, date de fin = le lendemain) et glisse les fichiers ensemble.</div>` : ''}
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn ghost sm" id="dPrev" ${idx <= 0 ? 'disabled' : ''} aria-label="Jour précédent">‹ Jour précédent</button>
         <select id="dSel" aria-label="Choisir le jour" style="font:inherit;font-weight:700;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)">
@@ -234,6 +241,7 @@
       ${others.length ? `<span class="hint">Autres points de vente : ${others.map(k => `${esc(k)} ${eur(syn.parPV[k].total)}`).join(' · ')}</span>` : ''}
       <span class="hint">Hors périmètre : ${Object.entries(syn.horsPerimetre).map(([k, v]) => `${esc(k.toLowerCase())} ${eur(v)}`).join(' · ') || 'rien'}.</span>
       ${top.length ? `<h3 style="margin-top:4px">Bar · articles les plus vendus</h3><div class="bars">${top.map(([n, a]) => `<div class="barrow"><span>${esc(n)}</span><div class="track"><i style="width:${Math.max(2, a.net / maxTop * 100)}%"></i></div><span class="v">${fr(a.q)} · ${eur(a.net)}</span></div>`).join('')}</div>` : ''}
+      <h3 style="margin-top:6px">Tous les articles vendus · ${cap(selDay)}</h3>${allArts}
       ${last7.length > 1 ? `<h3 style="margin-top:6px">Les ${last7.length} derniers jours importés · clique sur un jour pour le détail</h3><div class="tbl"><table class="t"><thead><tr><th>Jour</th>${PV.map(p => `<th class="n">${p[1]}</th>`).join('')}<th class="n">Total des trois</th></tr></thead><tbody>
         ${last7.slice().reverse().map(d => { const sy = synDay(d); return `<tr data-day="${d}" style="cursor:pointer${d === selDay ? ';background:var(--brass-soft)' : ''}"><td>${cap(d)}</td>${PV.map(p => `<td class="n">${eur(tot(sy, p[0]))}</td>`).join('')}<td class="n"><b>${eur(t3(sy))}</b></td></tr>`; }).join('')}
       </tbody></table></div>` : ''}
