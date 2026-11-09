@@ -77,7 +77,7 @@
   ];
   function renderDesk() {
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 9</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 12</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button ${on ? 'aria-current="page"' : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -113,6 +113,7 @@
         const type = BarImport.detectType(wb);
         if (!type) throw new Error("Fichier non reconnu : ni Stock théorique, ni Analyse des ventes.");
         const res = type === 'stock' ? BarImport.parseStock(XLSX, wb, f.name) : BarImport.parseVentes(XLSX, wb, f.name);
+        if (type === 'ventes') selDay = res.periode.debut;   // on affiche directement le jour importé
         const msg = await saveImport(res, f.name);
         line.className = 'ok'; line.textContent = msg;
       } catch (e) {
@@ -202,7 +203,7 @@
     const days = [...new Set((imps || []).map(i => i.periode_debut).filter(Boolean))].sort();
     if (!days.length) { box.innerHTML = `<div class="empty">Importe une Analyse des ventes pour voir le rapport de la veille.</div>`; return; }
     const hier = new Date(Date.parse(today + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
-    if (!selDay || !days.includes(selDay)) selDay = days.includes(hier) ? hier : days[days.length - 1];
+    if (!selDay || !days.includes(selDay)) selDay = days.includes(today) ? today : days[days.length - 1];   // à l'ouverture : le jour même s'il est importé, sinon le plus récent
     const idx = days.indexOf(selDay);
     const last7 = days.slice(-7);
     const prevWeek = new Date(Date.parse(selDay + 'T12:00:00Z') - 7 * 864e5).toISOString().slice(0, 10);
@@ -233,7 +234,7 @@
         <select id="dSel" aria-label="Choisir le jour" style="font:inherit;font-weight:700;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)">
           ${days.slice().reverse().map(d => `<option value="${d}" ${d === selDay ? 'selected' : ''}>${cap(d)}</option>`).join('')}</select>
         <button class="btn ghost sm" id="dNext" ${idx >= days.length - 1 ? 'disabled' : ''} aria-label="Jour suivant">Jour suivant ›</button>
-        ${selDay === hier ? '<span class="pill p-ok">hier</span>' : ''}
+        ${selDay === today ? '<span class="pill p-ok">aujourd’hui</span>' : selDay === hier ? '<span class="pill p-ok">hier</span>' : ''}
       </div>
       <div class="tiles">${PV.map(([k, l]) => { const p = syn.parPV[k]; const v = p ? p.total : 0; const pw = synPW ? tot(synPW, k) : null;
         return `<div class="tile"><div class="k">${l}</div><div class="v">${eur(v)}</div><div class="s">${p ? Object.entries(p.centres).sort((a, b) => b[1] - a[1]).map(([c, x]) => `${esc(c.toLowerCase())} ${eur(x)}`).join(' · ') : 'aucune vente encaissée'}</div>${pw ? `<div class="s">${evol(v, pw)}</div>` : ''}</div>`; }).join('')}
