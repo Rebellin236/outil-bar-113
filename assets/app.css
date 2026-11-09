@@ -187,3 +187,4 @@ html,body,.ph,.ph button{touch-action:manipulation}
 .kp-step b{text-align:center;font:800 28px var(--mono)}
 .kp-q4{grid-template-columns:repeat(4,1fr)}
 .kp-quick button.on{background:var(--brass);color:#1b1307}
+.cell.unsaved{border-color:var(--warn);box-shadow:inset 0 -3px 0 var(--warn)}

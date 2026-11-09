@@ -157,7 +157,7 @@
     const vals = {}, rvals = {};
     res.articles.forEach(a => { vals[a.id] = {}; rvals[a.id] = {}; });
     (lignes || []).forEach(l => { (l.recompte ? rvals : vals)[l.article_id] && ((l.recompte ? rvals : vals)[l.article_id][l.emplacement] = String(l.quantite)); });
-    P = { app, date, comptage: res.comptage, articles: res.articles, vals, rvals, cur: null, buf: '', kegN: 0, kegT: false,
+    P = { app, date, comptage: res.comptage, articles: res.articles, vals, rvals, cur: null, buf: '', kegN: 0, kegT: false, pending: new Map(), flushing: null, retry: null,
       phase: res.comptage.valide_le ? 'done' : (res.comptage.recompte_ids && res.comptage.recompte_ids.length ? 'recount' : 'count') };
     P.stock = await stockDuJour(date);
     drawPhone();
@@ -206,15 +206,17 @@
     app.innerHTML = `<div class="ph">${phHead(P.date, t ? f / t : 0)}
       <div class="ph-top ph-status"><div class="status ${P.stock ? '' : 'missing'}">${P.stock ? `Stock théorique du jour importé (${fmtDT(P.stock.exporte_le)}) : recompte immédiat actif` : 'Stock du jour pas encore importé : pas de recompte immédiat, les écarts seront calculés après l’import'}</div></div>
       <div class="ph-body">
+      <div class="status-warn" id="unsaved" hidden></div>
       ${P.phase === 'recount' ? `<div class="status-warn">${P.comptage.recompte_ids.length} article${P.comptage.recompte_ids.length > 1 ? 's' : ''} à recompter. Recompte les lignes surlignées, sans regarder les autres.</div>` : ''}
       ${table(bar, `Bar · ${bar.length} articles du jour`, 'tirage du jour')}
       ${table(cans, 'Canettes · tous les jours', 'liste fixe')}
       <p class="hint" style="margin:0 4px">Touche une case : le pavé s'ouvre dessous, « Suivant » descend dans la colonne. Toute la réserve, puis le bar, puis le Mshop. Un emplacement vide se saisit 0.</p>
       <div class="ph-foot"><button class="btn brass" id="valider" ${f < t ? 'disabled' : ''}>${f < t ? `Encore ${t - f} case${t - f > 1 ? 's' : ''} à remplir` : P.phase === 'recount' ? 'Valider le recompte' : 'Valider le comptage'}</button></div>
       ${phFoot()}</div></div>`;
-    app.querySelectorAll('.cell[data-a]').forEach(b => b.onclick = async () => { if (P.cur) await commit(); P.cur = { a: +b.dataset.a, e: b.dataset.e }; P.buf = ''; P.kegN = 0; P.kegT = false; P.chip = false; drawPhone(); scrollKp(); });
+    app.querySelectorAll('.cell[data-a]').forEach(b => b.onclick = () => { if (P.cur) commit(); P.cur = { a: +b.dataset.a, e: b.dataset.e }; P.buf = ''; P.kegN = 0; P.kegT = false; P.chip = false; drawPhone(); scrollKp(); });
     if (P.cur) bindKeypad();
     document.getElementById('valider').onclick = valider;
+    majNonEnregistre();
     bindFoot();
   }
 
@@ -247,7 +249,8 @@
   }
   const curArt = () => P.articles.find(x => x.id === P.cur.a);
 
-  async function commit() {
+  /* Saisie : mise à jour locale immédiate, enregistrement en file d'attente avec reprise (réseau faible à l'économat) */
+  function commit() {
     const a = curArt(); if (!a) return;
     let val = null;
     if (a.unite === 'litres' && P.kegT) val = P.kegN * tailleFut(a) + num(P.buf);
@@ -256,17 +259,45 @@
     if (val === null) return;
     const rec = P.phase === 'recount';
     cellsOf(a)[P.cur.e] = String(val);
-    const { error } = await C().sb.from('bar_comptage_lignes').upsert({ comptage_id: P.comptage.id, article_id: a.id, emplacement: P.cur.e, quantite: val, recompte: rec, saisi_le: new Date().toISOString() }, { onConflict: 'comptage_id,article_id,emplacement,recompte' });
-    if (error) C().toast('Saisie non enregistrée : ' + error.message);
+    const key = [a.id, P.cur.e, rec].join('|');
+    P.pending.set(key, { comptage_id: P.comptage.id, article_id: a.id, emplacement: P.cur.e, quantite: val, recompte: rec, saisi_le: new Date().toISOString() });
+    flush();
+  }
+  async function flush() {
+    if (P.flushing) return P.flushing;
+    if (!P.pending.size) { majNonEnregistre(); return; }
+    P.flushing = (async () => {
+      await null; // l'affectation de P.flushing doit précéder la fin de la boucle
+      let essais = 0;
+      while (P.pending.size && essais < 4) {
+        const rows = [...P.pending.entries()];
+        let error = null;
+        try { ({ error } = await C().sb.from('bar_comptage_lignes').upsert(rows.map(r => r[1]), { onConflict: 'comptage_id,article_id,emplacement,recompte' })); }
+        catch (e) { error = e; }
+        if (error) console.warn('Enregistrement en attente', error);
+        if (!error) { rows.forEach(([k, r]) => { if (P.pending.get(k) === r) P.pending.delete(k); }); essais = 0; }
+        else { essais++; await new Promise(r => setTimeout(r, 700 * essais)); }
+      }
+      P.flushing = null;
+      majNonEnregistre();
+      if (P.pending.size && !P.retry) P.retry = setTimeout(() => { P.retry = null; flush(); }, 5000);
+    })();
+    return P.flushing;
+  }
+  function majNonEnregistre() {
+    const el = document.getElementById('unsaved'); if (!el) return;
+    el.hidden = !P.pending.size;
+    el.textContent = `${P.pending.size} saisie${P.pending.size > 1 ? 's' : ''} en attente de réseau. Elles partent dès que la connexion revient.`;
+    P.app.querySelectorAll('.cell[data-a]').forEach(b => b.classList.toggle('unsaved', [...P.pending.values()].some(r => r.article_id === +b.dataset.a && r.emplacement === b.dataset.e)));
   }
 
   function bindKeypad() {
     P.app.querySelectorAll('[data-kp]').forEach(b => b.onclick = async () => {
       const k = b.dataset.kp, a = curArt();
-      if (k === 'close') { await commit(); P.cur = null; drawPhone(); return; }
+      if (k === 'close') { commit(); P.cur = null; drawPhone(); return; }
       if (k === 'next') {
         if (P.buf === '' && !P.kegT && (cellsOf(a)[P.cur.e] ?? '') === '') P.buf = '0';
-        await commit();
+        commit();
         const o = ordre(), i = o.findIndex(x => x.a === P.cur.a && x.e === P.cur.e);
         P.cur = o[i + 1] || null; drawPhone(); if (P.cur) scrollKp(); else C().toast('Dernière case remplie');
         return;
@@ -288,8 +319,17 @@
 
   async function valider() {
     const { sb, toast } = C();
-    if (P.cur) { await commit(); P.cur = null; }
+    if (P.cur) { commit(); P.cur = null; }
     const btn = document.getElementById('valider'); if (btn) { btn.disabled = true; btn.textContent = 'Vérification…'; }
+    // 1. tout doit être enregistré ; 2. on repart des valeurs de la base (pas de l'écran)
+    await flush();
+    if (P.pending.size) { toast('Pas de réseau : des saisies ne sont pas encore enregistrées. Réessaie dans un instant.'); drawPhone(); return; }
+    const { data: enBase, error: eLect } = await sb.from('bar_comptage_lignes').select('*').eq('comptage_id', P.comptage.id);
+    if (eLect) { toast('Pas de réseau : réessaie dans un instant.'); drawPhone(); return; }
+    P.articles.forEach(a => { P.vals[a.id] = {}; P.rvals[a.id] = P.rvals[a.id] || {}; });
+    (enBase || []).forEach(l => { const t = l.recompte ? P.rvals : P.vals; if (t[l.article_id]) t[l.article_id][l.emplacement] = String(l.quantite); });
+    const [f0, t0] = remplies();
+    if (f0 < t0) { toast(`${t0 - f0} case${t0 - f0 > 1 ? 's' : ''} non enregistrée${t0 - f0 > 1 ? 's' : ''} : ressaisis les cases vides.`); drawPhone(); return; }
     P.stock = await stockDuJour(P.date);
     if (P.phase === 'count' && P.stock) {
       const R = await reglages();
