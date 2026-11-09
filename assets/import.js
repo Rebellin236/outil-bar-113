@@ -108,12 +108,18 @@
     }
     if (!lignes.length) throw new Error('Aucune ligne de vente trouvée dans ce fichier.');
     const dates = [...new Set(lignes.map(l => l.date_vente))].sort();
-    // Sur plusieurs jours, Bizzon cumule chaque article sur toute la période avec une seule date : les ventes par jour seraient fausses.
+    // Un fichier = une journée Bizzon. Une soirée qui finit après minuit fait apparaître des lignes datées du lendemain :
+    // elles appartiennent à la même journée. Au-delà, Bizzon cumule chaque article sur la période et les chiffres par jour seraient faux.
     const per = parsePeriode(fichier);
-    if (dates.length > 1 || (per.debut && per.fin && per.debut !== per.fin)) {
-      throw new Error("Cet export couvre plusieurs jours. Sur une période, Bizzon additionne chaque article sans le répartir par jour, donc les chiffres seraient faux. Exporte une seule journée (celle d'hier) et réimporte.");
+    const addDay = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+    const jour = per.debut || dates[0];
+    const ecartFichier = per.debut && per.fin ? Math.round((Date.parse(per.fin) - Date.parse(per.debut)) / 864e5) : 0;
+    const horsJour = dates.filter(d => d !== jour && d !== addDay(jour, 1));
+    if (ecartFichier > 1 || horsJour.length) {
+      throw new Error("Cet export couvre plusieurs journées. Sur plusieurs jours, Bizzon additionne chaque article sans le répartir par jour, donc les chiffres seraient faux. Exporte une journée à la fois (date de début = le jour voulu, date de fin = le lendemain).");
     }
-    return { type: 'ventes', periode: { debut: dates[0], fin: dates[dates.length - 1] }, lignes };
+    for (const l of lignes) l.date_vente = jour;   // ventes d'après minuit rattachées à la journée
+    return { type: 'ventes', periode: { debut: jour, fin: jour }, lignes };
   }
 
   // Synthèse des ventes d'une journée : par point de vente, hors exclusions (petit-déjeuner, banquet)
