@@ -26,7 +26,7 @@
 
   function toast(t) { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(e._t); e._t = setTimeout(() => e.hidden = true, 2600); }
 
-  let user = null, role = null, roleName = '';
+  let user = null, role = null, roleName = '', selDay = null;
 
   /* ---------------- Connexion ---------------- */
   function renderLogin(msg) {
@@ -177,7 +177,7 @@
       const missing = (arts || []).filter(a => !byN[a.nom_bizzon]);
       $('#stock').innerHTML = `<div class="card"><div class="main-h" style="align-items:center"><h3>Articles suivis · stock théorique Économat</h3><span class="hint">référence : export du ${fmtDT(st.exporte_le)}</span></div>
         ${missing.length ? `<div class="err" style="background:var(--warn-soft);color:var(--warn)">${missing.length} article${missing.length > 1 ? 's' : ''} introuvable${missing.length > 1 ? 's' : ''} dans l'export : ${missing.map(m => esc(m.nom_court)).join(', ')}. Le nom a peut-être changé dans Bizzon.</div>` : ''}
-        <div class="tbl"><table class="t"><thead><tr><th>Article</th><th class="n">Théorique</th><th class="n">Prix unitaire</th><th class="n">Valeur</th><th class="n">Vendu sur la période</th><th>Fréquence</th></tr></thead><tbody>
+        <div class="tbl"><table class="t"><thead><tr><th>Article</th><th class="n">Théorique</th><th class="n">Prix unitaire</th><th class="n">Valeur</th><th class="n">Vendu (période de l'export)</th><th>Fréquence</th></tr></thead><tbody>
         ${groups.map(([g, lbl]) => `<tr class="grp"><td colspan="6">${lbl}</td></tr>` + (arts || []).filter(a => a.type === g).map(a => {
           const l = byN[a.nom_bizzon];
           return `<tr><td>${esc(a.nom_court)}</td>${l ? `<td class="n">${fr(l.prevu, 3)} ${UNIT(l.unite)}</td><td class="n">${eur(l.prix)}</td><td class="n">${eur(l.valeur)}</td><td class="n">${fr(l.vendu, 3)}</td>` : '<td colspan="4"><span class="pill p-warn">introuvable dans l’export</span></td>'}<td>${a.type === 'canette' ? 'tous les jours' : a.freq_semaine + ' fois / semaine'}</td></tr>`;
@@ -189,19 +189,29 @@
     if (!ve) { $('#ventes').innerHTML = `<div class="empty">Importe une Analyse des ventes pour voir le rapport de la veille.</div>`; return; }
     const { data: vl } = await sb.from('bar_ventes').select('*').eq('import_id', ve.id);
     const days = [...new Set((vl || []).map(l => l.date_vente))].sort();
-    const jour = days[days.length - 1];
-    const syn = BarImport.syntheseVentes((vl || []).filter(l => l.date_vente === jour), R.exclusions_ventes);
     const PV = [['BAR 1.13', 'Bar 1.13'], ['RESTAURANT 1.13', 'Restaurant 1.13'], ['M SHOP', 'Mshop']];
+    const synDay = d => BarImport.syntheseVentes((vl || []).filter(l => l.date_vente === d), R.exclusions_ventes);
+    const hier = new Date(Date.parse(today + 'T12:00:00Z') - 864e5).toISOString().slice(0, 10);
+    if (!selDay || !days.includes(selDay)) selDay = days.includes(hier) ? hier : days[days.length - 1];
+    const tot = (syn, k) => syn.parPV[k] ? syn.parPV[k].total : 0;
+    const daysTbl = days.length > 1 ? `<div class="tbl"><table class="t"><thead><tr><th>Jour</th>${PV.map(p => `<th class="n">${p[1]}</th>`).join('')}<th class="n">Total des trois</th><th class="n">Hors périmètre</th></tr></thead><tbody>
+      ${days.map(d => { const sy = synDay(d); const t3 = PV.reduce((s, p) => s + tot(sy, p[0]), 0); const hp = Object.values(sy.horsPerimetre).reduce((a, b) => a + b, 0);
+        return `<tr data-day="${d}" style="cursor:pointer${d === selDay ? ';background:var(--brass-soft)' : ''}"><td>${fmtD(d)}</td>${PV.map(p => `<td class="n">${eur(tot(sy, p[0]))}</td>`).join('')}<td class="n"><b>${eur(t3)}</b></td><td class="n">${eur(hp)}</td></tr>`; }).join('')}
+      </tbody></table></div><span class="hint">Clique sur un jour pour voir son détail.</span>` : '';
+    const syn = synDay(selDay);
     const others = Object.keys(syn.parPV).filter(k => !PV.some(p => p[0] === k));
     const bar = syn.parPV['BAR 1.13'];
     const top = bar ? Object.entries(bar.articles).sort((a, b) => b[1].net - a[1].net).slice(0, 8) : [];
     const maxTop = top.length ? top[0][1].net : 1;
-    $('#ventes').innerHTML = `<div class="card"><div class="main-h" style="align-items:center"><h3 style="text-transform:none">Ventes du ${fmtD(jour)}</h3><span class="hint">CA net HT · source : Analyse des ventes</span></div>
+    $('#ventes').innerHTML = `<div class="card"><div class="main-h" style="align-items:center"><h3>Ventes${days.length > 1 ? ` du ${fmtD(days[0])} au ${fmtD(days[days.length - 1])}` : ''}</h3><span class="hint">CA net HT · source : Analyse des ventes</span></div>
+      ${daysTbl}
+      <h3 style="margin-top:6px">Détail du ${fmtD(selDay)}</h3>
       <div class="tiles">${PV.map(([k, l]) => { const p = syn.parPV[k]; return `<div class="tile"><div class="k">${l}</div><div class="v">${eur(p ? p.total : 0)}</div><div class="s">${p ? Object.entries(p.centres).sort((a, b) => b[1] - a[1]).map(([c, v]) => `${esc(c.toLowerCase())} ${eur(v)}`).join(' · ') : 'aucune vente encaissée'}</div></div>`; }).join('')}</div>
       ${others.length ? `<span class="hint">Autres points de vente : ${others.map(k => `${esc(k)} ${eur(syn.parPV[k].total)}`).join(' · ')}</span>` : ''}
       <span class="hint">Hors périmètre : ${Object.entries(syn.horsPerimetre).map(([k, v]) => `${esc(k.toLowerCase())} ${eur(v)}`).join(' · ') || 'rien'}.</span>
       ${top.length ? `<h3 style="margin-top:4px">Bar · articles les plus vendus</h3><div class="bars">${top.map(([n, a]) => `<div class="barrow"><span>${esc(n)}</span><div class="track"><i style="width:${Math.max(2, a.net / maxTop * 100)}%"></i></div><span class="v">${fr(a.q)} · ${eur(a.net)}</span></div>`).join('')}</div>` : ''}
     </div>`;
+    document.querySelectorAll('#ventes tr[data-day]').forEach(tr => tr.onclick = () => { selDay = tr.dataset.day; refreshToday(); });
   }
 
   sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') renderLogin(); });
