@@ -99,7 +99,7 @@
       const r = a[i];
       if (i === hi || !r || typeof num(r[C.q]) !== 'number' || isNaN(num(r[C.q])) || !r[C.art] || !r[C.pv]) continue;
       let d = r[C.date];
-      if (d instanceof Date) d = d.toISOString().slice(0, 10);
+      if (d instanceof Date) d = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; // date locale : toISOString décalerait d'un jour à Paris
       else if (typeof d === 'number') d = new Date(Math.round((d - 25569) * 864e5)).toISOString().slice(0, 10);
       else if (typeof d === 'string') { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(d) || /(\d{2})\/(\d{2})\/(\d{4})/.exec(d); d = m ? (m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3]}-${m[2]}-${m[1]}`) : null; }
       if (!d) continue;

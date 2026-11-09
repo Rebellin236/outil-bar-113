@@ -108,7 +108,7 @@
     for (const f of files) {
       const line = log(`Lecture de ${f.name}…`);
       try {
-        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
         const type = BarImport.detectType(wb);
         if (!type) throw new Error("Fichier non reconnu : ni Stock théorique, ni Analyse des ventes.");
         const res = type === 'stock' ? BarImport.parseStock(XLSX, wb, f.name) : BarImport.parseVentes(XLSX, wb, f.name);
@@ -141,13 +141,14 @@
       catch (e) { await sb.from('bar_imports').delete().eq('id', imp.id); throw e; }
       return `Stock théorique exporté le ${res.exporte.affichage} : ${res.lignes.length} articles de l'Économat importés.`;
     }
-    // Ventes : un nouvel import de la même période remplace l'ancien
-    const { data: old } = await sb.from('bar_imports').select('id').eq('type', 'ventes').eq('periode_debut', res.periode.debut).eq('periode_fin', res.periode.fin);
+    // Ventes : pour chaque jour, seul le dernier import compte. Un fichier réimporté sous le même nom remplace l'ancien en entier.
+    const { data: old } = await sb.from('bar_imports').select('id').eq('type', 'ventes').eq('fichier', fichier);
     const { data: imp, error } = await sb.from('bar_imports').insert({ type: 'ventes', fichier, periode_debut: res.periode.debut, periode_fin: res.periode.fin, nb_lignes: res.lignes.length, importe_par: user.id }).select('id').single();
     if (error) throw new Error(error.message);
     try { await insertChunks('bar_ventes', res.lignes, imp.id); }
     catch (e) { await sb.from('bar_imports').delete().eq('id', imp.id); throw e; }
     if (old && old.length) await sb.from('bar_imports').delete().in('id', old.map(o => o.id));
+    await sb.from('bar_ventes').delete().gte('date_vente', res.periode.debut).lte('date_vente', res.periode.fin).neq('import_id', imp.id);
     const per = res.periode.debut === res.periode.fin ? `du ${fmtD(res.periode.debut)}` : `du ${res.periode.debut} au ${res.periode.fin}`;
     return `Ventes ${per} : ${res.lignes.length} lignes importées${old && old.length ? ' (import précédent remplacé)' : ''}.`;
   }
