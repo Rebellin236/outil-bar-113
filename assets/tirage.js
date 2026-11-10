@@ -22,7 +22,7 @@
 
   function nomCourt(nom) {
     return String(nom).toLowerCase().replace(/\s+/g, ' ').trim().replace(/(^|[\s'(-])([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase())
-      .replace(/(\d+)\s?Cl\b/g, '$1 cl').replace(/(\d+)l\b/gi, '$1 L');
+      .replace(/(\d+)\s?cl\b/gi, '$1 cl').replace(/(\d+)l\b/gi, '$1 L').replace(/\b(Vc|Vp|Ivc|Bio)\b/g, m => m === 'Bio' ? 'bio' : m.toUpperCase());
   }
 
   /**
