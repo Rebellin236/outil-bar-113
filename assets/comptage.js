@@ -110,8 +110,19 @@
     let pool = lignes.filter(l => ok(l) && Number(l.vendu) > 0);
     if (pool.length < 15) pool = lignes.filter(l => ok(l) && (Number(l.vendu) > 0 || Number(l.prevu) > 0)); // peu de ventes : articles en stock
     const rotation = pool.map(l => ({ nom_bizzon: l.nom_bizzon, poids: Math.sqrt(1 + Math.max(0, Number(l.vendu) || 0) * (Number(l.prix) || 0)), l })); // gros volumes en valeur : tirés plus souvent
-    const choix = T.tirerBar({ date, nBar: 8, prioritaires: prio, comptesSemaine: comptes, dernierComptage: dernier, joursActifsRestants: restants,
-      recontrole, salsa, rotation, rng: T.rngDepuis(date) });
+    // Softs en bouteille (bar + économat) : chaque jour, des places réservées, tirées au hasard
+    const nSoft = Number(R.softs_par_jour ?? 2);
+    const estSoft = l => l.famille === 'SOFT/EAUX MINERALES' && /^1\.000 /.test(l.unite || '') && !exclus.has(l.nom_bizzon)
+      && !/SIROP|MONIN|PONTHIER|\b1L\b|1,25|1,5|1\.5|100 ?CL|PET\b|\d+ ?X ?\d|\*\d|TETRA/i.test(l.nom_bizzon)
+      && (Number(l.prevu) > 0 || Number(l.vendu) > 0);
+    const recents = new Set((sem || []).filter(t => t.article && t.date_jour >= T.addDays(date, -2)).map(t => t.article.nom_bizzon));
+    let softPool = lignes.filter(estSoft);
+    if (softPool.filter(l => !recents.has(l.nom_bizzon)).length >= nSoft) softPool = softPool.filter(l => !recents.has(l.nom_bizzon)); // pas les mêmes deux jours de suite
+    const rngS = T.rngDepuis('softs' + date), softs = [];
+    while (softs.length < nSoft && softPool.length) softs.push(softPool.splice(Math.floor(rngS() * softPool.length), 1)[0].nom_bizzon);
+    const choixBar = T.tirerBar({ date, nBar: 8 - softs.length, prioritaires: prio, comptesSemaine: comptes, dernierComptage: dernier, joursActifsRestants: restants,
+      recontrole, salsa, rotation: rotation.filter(r => !softs.includes(r.nom_bizzon)), rng: T.rngDepuis(date) });
+    const choix = choixBar.concat(softs.filter(n => !choixBar.some(c => c.nom_bizzon === n)).map(n => ({ nom_bizzon: n, motif: 'rotation' })));
     // Articles de rotation ou de salsa pas encore connus : on les crée
     const infos = Object.fromEntries(lignes.map(l => [l.nom_bizzon, l]));
     const nouveaux = choix.filter(c => !byNom[c.nom_bizzon]).map(c => { const l = infos[c.nom_bizzon] || {};
