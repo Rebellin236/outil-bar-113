@@ -90,6 +90,10 @@
     const a = rows(XLSX, wb.Sheets[name]);
     const hi = a.findIndex(r => r && r.includes('Point de vente') && r.includes("Nom de l'article"));
     if (hi < 0) throw new Error("Colonnes introuvables : ce fichier ne ressemble pas à une Analyse des ventes Bizzon.");
+    // Sans le regroupement par centre de revenus, Bizzon met chaque article sur une seule ligne avec un seul centre :
+    // la répartition Bar / Restaurant / Banquet serait fausse dès qu'un article est vendu à plusieurs endroits.
+    if (!a.some(r => r && typeof r[0] === 'string' && /^Centre de revenus\s*:/.test(r[0])))
+      throw new Error("Cet export n'est pas regroupé par centre. Dans Bizzon, refais l'Analyse des ventes en cochant « Centre de revenus » et « Centre de profit » (point de vente), sinon un article vendu au bar et en séminaire est compté d'un seul côté.");
     const h = a[hi];
     const c = n => h.indexOf(n);
     const C = { date: c('Date'), art: c("Nom de l'article"), grp: c('Groupe de famille'), fam: c('Famille'), sf: c('Sous-famille'),
