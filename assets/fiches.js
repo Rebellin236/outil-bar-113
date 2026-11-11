@@ -30,7 +30,8 @@
       else if (!pn.length && sn.length) sc -= 0.25;                                    // Heineken ≠ Heineken 00
       if (pn.length && sn.length && pn.every(n => sn.includes(n))) sc += 0.1;
       if (!/^1\.000 /.test(s.unite || '')) sc -= 0.15;                                  // carton, pack
-      if (!best || sc > best.sc) best = { sc, s };
+      const tri = sc + (Number(s.prevu) > 0 || Number(s.vendu) > 0 ? 0.05 : 0); // à nom égal, l'article réellement utilisé (ex. TSARINE BRUT 75CL BIS), sans changer la certitude
+      if (!best || tri > best.tri) best = { sc, tri, s };
     }
     return best;
   }
@@ -125,7 +126,7 @@
     const { sb } = C();
     const { data: imp } = await sb.from('bar_imports').select('id,exporte_le').eq('type', 'stock').order('exporte_le', { ascending: false }).limit(1);
     if (!imp || !imp[0]) return { imp: null, lignes: [] };
-    const { data } = await sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prix').eq('import_id', imp[0].id).limit(5000);
+    const { data } = await sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prix,prevu,vendu').eq('import_id', imp[0].id).limit(5000);
     return { imp: imp[0], lignes: data || [] };
   }
 
