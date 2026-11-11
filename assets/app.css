@@ -282,3 +282,4 @@ table.fiches td:first-child{white-space:normal;min-width:160px}
 .sj .btn{align-self:flex-start}
 table.sj-t tr.h td{background:var(--bad-soft)}
 .pos{color:var(--warn)}
+.card table.t tr.h td{background:var(--bad-soft)}

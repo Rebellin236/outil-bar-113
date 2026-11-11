@@ -23,6 +23,20 @@
     const ref = [...(avant || []), ...(cpts || [])];
     const ecarts = {};
     for (const c of ref) ecarts[c.date_jour] = await window.BarViews.calculerEcarts(c.id);
+    // Situation à date : dernier écart connu de chaque article compté depuis le 1er du mois (un écart est un état du stock, pas un flux : on ne l'additionne pas jour après jour)
+    const fin = dim < auj ? dim : auj, debMois = fin.slice(0, 8) + '01';
+    const { data: cMois } = await sb.from('bar_comptages').select('*').gte('date_jour', debMois).lte('date_jour', fin).not('valide_le', 'is', null).order('date_jour');
+    for (const c of cMois || []) if (!ecarts[c.date_jour]) ecarts[c.date_jour] = await window.BarViews.calculerEcarts(c.id);
+    const situ = {};
+    for (const c of cMois || []) for (const r of ecarts[c.date_jour]) {
+      if (r.e === null) continue;
+      const x = situ[r.article.id] || (situ[r.article.id] = { a: r.article, premier: { e: r.e, ev: r.ev, d: c.date_jour }, n: 0 });
+      x.dernier = { e: r.e, ev: r.ev || 0, d: c.date_jour, hors: r.hors, cause: r.cause }; x.n++;
+    }
+    const situL = Object.values(situ).sort((a, b) => a.dernier.ev - b.dernier.ev);
+    const situTot = situL.reduce((s, x) => s + x.dernier.ev, 0), situHors = situL.filter(x => x.dernier.hors);
+    const situEvol = situL.reduce((s, x) => s + (x.dernier.ev - (x.premier.ev || 0)), 0);
+    const nomMois = new Date(fin + 'T12:00:00Z').toLocaleDateString('fr-FR', { month: 'long' });
     const dernier = {}; // dernier écart connu de chaque article, au fil des jours
     const varia = {};
     for (const c of ref) for (const r of ecarts[c.date_jour]) {
@@ -39,7 +53,8 @@
     const toutes = valides.flatMap(c => ecarts[c.date_jour].map(r => ({ ...r, d: c.date_jour })));
     const hors = toutes.filter(r => r.hors);
     const sansCause = hors.filter(r => !r.cause);
-    const totEv = hors.reduce((s, r) => s + (r.ev || 0), 0);
+    const derSem = {}; toutes.forEach(r => { derSem[r.article.id] = r; }); // dernier écart de chaque article dans la semaine
+    const totEv = Object.values(derSem).filter(r => r.hors).reduce((s, r) => s + (r.ev || 0), 0);
     const recur = {}; hors.forEach(r => (recur[r.article.id] = recur[r.article.id] || { a: r.article, jours: [] }).jours.push(r));
     const recurrents = Object.values(recur).filter(x => x.jours.length >= 2).sort((a, b) => b.jours.length - a.jours.length);
     const pv = (pertes || []).filter(p => p.statut !== 'refusee');
@@ -70,10 +85,22 @@
       <div class="tiles">
         <div class="tile ${valides.length < prevus.length ? 'warm' : ''}"><div class="k">Comptages faits</div><div class="v">${valides.length}/${prevus.length}</div><div class="s">jours prévus jusqu'à aujourd'hui</div></div>
         <div class="tile"><div class="k">Écarts hors seuil</div><div class="v ${hors.length ? 'neg' : ''}">${hors.length}</div><div class="s">sur ${toutes.length} lignes comptées</div></div>
-        <div class="tile"><div class="k">Écart valorisé</div><div class="v ${totEv < 0 ? 'neg' : ''}">${eur(totEv)}</div><div class="s">écarts hors seuil, prix Bizzon</div></div>
+        <div class="tile"><div class="k">Écart valorisé</div><div class="v ${totEv < 0 ? 'neg' : ''}">${eur(totEv)}</div><div class="s">dernier écart hors seuil de chaque article, sans double compte</div></div>
         <div class="tile ${sansCause.length ? 'warm' : ''}"><div class="k">Causes à renseigner</div><div class="v">${sansCause.length}</div><div class="s">dans la page Écarts</div></div>
         <div class="tile"><div class="k">Pertes déclarées</div><div class="v">${pv.length}</div><div class="s">${aVal ? `<b style="color:var(--warn)">${aVal} à valider</b>` : 'toutes traitées'}</div></div>
       </div>
+      ${situL.length ? `<div class="card"><div class="main-h" style="align-items:baseline"><h3>Écart à date · ${nomMois}, au ${Number(fin.slice(8))}/${fin.slice(5, 7)}</h3><span class="hint">${situL.length} articles comptés depuis le 1er</span></div>
+        <div class="tiles"><div class="tile"><div class="k">Écart à date</div><div class="v ${situTot < 0 ? 'neg' : ''}">${eur(situTot)}</div><div class="s">dernier écart connu de chaque article</div></div>
+          <div class="tile"><div class="k">Articles hors seuil à date</div><div class="v ${situHors.length ? 'neg' : ''}">${situHors.length}</div><div class="s">à leur dernier comptage</div></div>
+          <div class="tile"><div class="k">Évolution depuis le 1er comptage du mois</div><div class="v ${situEvol < 0 ? 'neg' : ''}">${eur(situEvol)}</div><div class="s">négatif = le manque s'est creusé</div></div></div>
+        <div class="tbl"><table class="t"><thead><tr><th>Article</th><th class="n">Comptages</th><th>Dernier comptage</th><th class="n">Écart à date</th><th class="n">€</th><th class="n">Au 1er comptage du mois</th><th class="n">Évolution €</th><th>Cause</th></tr></thead><tbody>
+        ${situL.filter(x => ouverts.has('situ') || x.dernier.hors || Math.abs(x.dernier.ev - (x.premier.ev || 0)) >= 1).map(x => `<tr class="${x.dernier.hors ? 'h' : ''}"><td><b>${esc(x.a.nom_court)}</b></td><td class="n">${x.n}</td><td>${Number(x.dernier.d.slice(8))}/${x.dernier.d.slice(5, 7)}</td>
+          <td class="n ${x.dernier.e < 0 ? 'neg' : ''}">${x.dernier.e > 0 ? '+' : ''}${fr(x.dernier.e, 3)} ${U[x.a.unite]}</td><td class="n ${x.dernier.ev < 0 ? 'neg' : ''}">${eur(x.dernier.ev)}</td>
+          <td class="n hint">${x.n > 1 ? `${x.premier.e > 0 ? '+' : ''}${fr(x.premier.e, 3)} le ${Number(x.premier.d.slice(8))}/${x.premier.d.slice(5, 7)}` : '–'}</td>
+          <td class="n ${x.dernier.ev - (x.premier.ev || 0) < 0 ? 'neg' : ''}">${x.n > 1 ? eur(x.dernier.ev - (x.premier.ev || 0)) : '–'}</td><td>${x.dernier.cause ? esc(x.dernier.cause.cause) : x.dernier.hors ? '<span style="color:var(--bad);font-weight:700">à renseigner</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="8" class="hint">Aucun écart notable à date.</td></tr>'}
+        </tbody></table></div>
+        <button class="btn ghost sm" data-ouvre="situ" style="align-self:flex-start">${ouverts.has('situ') ? 'Ne garder que les écarts' : `Voir les ${situL.length} articles comptés`}</button>
+        <span class="hint">Un écart est un état du stock : le même manque retrouvé trois jours de suite reste un seul manque. L'écart à date prend donc le <b>dernier</b> écart de chaque article, sans additionner les jours. Si tu corriges le stock dans Bizzon, l'écart suivant repart de zéro.</span></div>` : ''}
       ${recurrents.length ? `<div class="card"><h3>Écarts qui reviennent cette semaine</h3><div class="tbl"><table class="t"><thead><tr><th>Article</th><th class="n">Jours hors seuil</th><th>Détail</th></tr></thead><tbody>
         ${recurrents.map(x => `<tr><td><b>${esc(x.a.nom_court)}</b></td><td class="n">${x.jours.length}</td><td>${x.jours.map(r => `${JOURS[T().isoDow(r.d) - 1].slice(0, 3)}. ${r.e > 0 ? '+' : ''}${fr(r.e, 3)} ${U[r.article.unite]}`).join(' · ')}</td></tr>`).join('')}
         </tbody></table></div><span class="hint">Un écart identique tous les jours (variation proche de 0) est un ancien écart pas corrigé dans Bizzon. Un écart qui grossit signale une fuite en cours.</span></div>` : ''}
