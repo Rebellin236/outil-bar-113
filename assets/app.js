@@ -80,7 +80,7 @@
   function renderDesk(sec) {
     if (sec) section = sec;
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 33</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 34</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button data-sec="${k}" ${on ? (k === section ? 'aria-current="page"' : '') : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -130,7 +130,7 @@
         if (!type) throw new Error("Fichier non reconnu : ni Stock théorique, ni Analyse des ventes, ni Produits à vendre.");
         if (type === 'produits') { const r = BarImport.parseProduits(XLSX, wb); r.fichier = f.name; line.textContent = `${f.name} : création des fiches…`; line.className = 'ok'; line.textContent = await window.BarFiches.importerProduits(r); continue; }
         const res = type === 'stock' ? BarImport.parseStock(XLSX, wb, f.name) : BarImport.parseVentes(XLSX, wb, f.name);
-        if (type === 'ventes') selDay = res.periode.debut;   // on affiche directement le jour importé
+        if (res.type === 'ventes') selDay = res.periode.debut;   // on affiche directement le jour importé
         const msg = await saveImport(res, f.name);
         line.className = 'ok'; line.textContent = msg;
       } catch (e) {
@@ -149,6 +149,15 @@
   }
 
   async function saveImport(res, fichier) {
+    if (res.type === 'ventes_periode') {
+      const { data: old } = await sb.from('bar_imports').select('id').eq('type', 'ventes_periode').eq('fichier', fichier);
+      const { data: imp, error } = await sb.from('bar_imports').insert({ type: 'ventes_periode', fichier, periode_debut: res.periode.debut, periode_fin: res.periode.fin, nb_lignes: res.lignes.length, importe_par: user.id }).select('id').single();
+      if (error) throw new Error(/check constraint|bar_ventes_periode/.test(error.message) ? 'Lance le script SQL 07 dans Supabase pour importer des ventes sur une période.' : error.message);
+      try { await insertChunks('bar_ventes_periode', res.lignes, imp.id); }
+      catch (e) { await sb.from('bar_imports').delete().eq('id', imp.id); throw e; }
+      if (old && old.length) await sb.from('bar_imports').delete().in('id', old.map(o => o.id));
+      return `Ventes du ${fmtD(res.periode.debut)} au ${fmtD(res.periode.fin)} : ${res.lignes.length} lignes importées pour le menu engineering${old && old.length ? ' (import précédent remplacé)' : ''}. Elles n'apparaissent pas dans le rapport jour par jour.`;
+    }
     if (res.type === 'stock') {
       if (!res.exporte) throw new Error("Heure d'export introuvable dans le fichier.");
       const exp = parisToUTC(res.exporte.iso);
@@ -276,8 +285,8 @@
     const el = $('#hist'); if (!el) return;
     if (!imps || !imps.length) { el.innerHTML = '<div class="empty">Aucun import pour l\'instant.</div>'; return; }
     el.innerHTML = `<div class="card"><div class="tbl"><table class="t"><thead><tr><th>Type</th><th>Contenu</th><th class="n">Lignes</th><th>Fichier</th><th>Importé le</th><th></th></tr></thead><tbody>
-      ${imps.map(i => `<tr><td>${i.type === 'stock' ? 'Stock théorique' : i.type === 'produits' ? 'Produits à vendre' : 'Ventes'}</td>
-        <td>${i.type === 'produits' ? 'prix de vente et fiches' : i.type === 'stock' ? 'exporté le ' + fmtDT(i.exporte_le) : (i.periode_debut === i.periode_fin ? fmtD(i.periode_debut) : `<span class="pill p-bad">plusieurs jours : faux</span> ${i.periode_debut} → ${i.periode_fin}`)}</td>
+      ${imps.map(i => `<tr><td>${i.type === 'stock' ? 'Stock théorique' : i.type === 'produits' ? 'Produits à vendre' : i.type === 'ventes_periode' ? 'Ventes sur une période' : 'Ventes'}</td>
+        <td>${i.type === 'produits' ? 'prix de vente et fiches' : i.type === 'ventes_periode' ? `du ${fmtD(i.periode_debut)} au ${fmtD(i.periode_fin)} · menu engineering` : i.type === 'stock' ? 'exporté le ' + fmtDT(i.exporte_le) : (i.periode_debut === i.periode_fin ? fmtD(i.periode_debut) : `<span class="pill p-bad">plusieurs jours : faux</span> ${i.periode_debut} → ${i.periode_fin}`)}</td>
         <td class="n">${i.nb_lignes ?? '–'}</td><td class="hint">${esc(i.fichier || '')}</td><td>${fmtDT(i.importe_le)}</td>
         <td><button class="btn ghost sm" data-del="${i.id}">Supprimer</button></td></tr>`).join('')}
       </tbody></table></div><span class="hint">Supprimer un import efface aussi toutes ses lignes. Tu peux ensuite réimporter le bon fichier.</span></div>`;

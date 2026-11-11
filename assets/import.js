@@ -121,7 +121,10 @@
     const ecartFichier = per.debut && per.fin ? Math.round((Date.parse(per.fin) - Date.parse(per.debut)) / 864e5) : 0;
     const horsJour = dates.filter(d => d !== jour && d !== addDay(jour, 1));
     if (ecartFichier > 1 || horsJour.length) {
-      throw new Error("Cet export couvre plusieurs journées. Sur plusieurs jours, Bizzon additionne chaque article sans le répartir par jour, donc les chiffres seraient faux. Exporte une journée à la fois (date de début = le jour voulu, date de fin = le lendemain).");
+      // Plusieurs journées : Bizzon additionne chaque article sur la période. Inutilisable jour par jour,
+      // mais exact pour le menu engineering : rangé à part, jamais mélangé au rapport quotidien.
+      const ds = dates.slice().sort();
+      return { type: 'ventes_periode', periode: { debut: per.debut || ds[0], fin: per.fin || ds[ds.length - 1] }, lignes };
     }
     for (const l of lignes) l.date_vente = jour;   // ventes d'après minuit rattachées à la journée
     return { type: 'ventes', periode: { debut: jour, fin: jour }, lignes };

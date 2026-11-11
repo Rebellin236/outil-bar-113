@@ -13,7 +13,7 @@
     dog: { nom: 'Poids mort', en: 'Dog', forme: 'triangle', reco: 'Ni populaire ni rentable : le retirer, ou le repenser (recette, prix, présentation).' }
   };
   const sansAccent = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-  let S = { periode: '30', pv: 'BAR 1.13', cat: '', debut: '', fin: '', tri: 'classe', survol: null };
+  let S = { source: 'jour', periode: '30', pv: 'BAR 1.13', cat: '', debut: '', fin: '', tri: 'classe', survol: null };
 
   function bornes(auj) {
     if (S.periode === 'perso' && S.debut && S.fin) return [S.debut, S.fin];
@@ -27,8 +27,12 @@
     const auj = todayParis();
     const [d0, d1] = bornes(auj);
     M.innerHTML = '<div class="hint">Calcul du menu engineering…</div>';
+    const { data: perImps } = await sb.from('bar_imports').select('id,fichier,periode_debut,periode_fin,nb_lignes').eq('type', 'ventes_periode').order('periode_debut', { ascending: false });
+    const srcImp = (perImps || []).find(i => String(i.id) === S.source);
+    if (!srcImp) S.source = 'jour';
     const [{ data: ventes }, { data: fiches, error }, { data: lignes }] = await Promise.all([
-      tout(() => sb.from('bar_ventes').select('date_vente,article,point_vente,quantite,net_ht').gte('date_vente', d0).lte('date_vente', d1).order('id')),
+      srcImp ? tout(() => sb.from('bar_ventes_periode').select('article,point_vente,quantite,net_ht').eq('import_id', srcImp.id).order('id'))
+        : tout(() => sb.from('bar_ventes').select('date_vente,article,point_vente,quantite,net_ht').gte('date_vente', d0).lte('date_vente', d1).order('id')),
       tout(() => sb.from('bar_fiches').select('*').order('id')),
       tout(() => sb.from('bar_fiche_lignes').select('*').order('id'))]);
     if (error) { M.innerHTML = `<div class="main-h"><div><h2>Menu engineering</h2></div></div><div class="empty">Lance d'abord le script SQL 05 et importe l'export « Produits à vendre ».</div>`; return; }
@@ -68,15 +72,16 @@
     const caTot = ok.reduce((s, x) => s + x.ca, 0), mBrute = ok.reduce((s, x) => s + x.mTot, 0), coutTot = ok.reduce((s, x) => s + x.cout * x.q, 0);
     const qSans = sansFiche.reduce((s, x) => s + x.q, 0);
     const nb = k => ok.filter(x => x.cl === k).length;
-    const per = `${fmtD(d0).replace(/^\w+ /, '')} au ${fmtD(d1).replace(/^\w+ /, '')}`;
+    const per = srcImp ? `fichier du ${fmtD(srcImp.periode_debut).replace(/^\w+ /, '')} au ${fmtD(srcImp.periode_fin).replace(/^\w+ /, '')}` : `${fmtD(d0).replace(/^\w+ /, '')} au ${fmtD(d1).replace(/^\w+ /, '')}`;
 
     M.innerHTML = `<div class="main-h"><div><h2>Menu engineering</h2><p>Méthode Kasavana &amp; Smith : popularité (part des ventes dans la section) × marge brute unitaire HT. Seuil de popularité = 70 % de la part moyenne ; seuil de marge = marge moyenne pondérée par les ventes. Une section de carte à la fois.</p></div></div>
       <div class="filtres">
-        <select id="mePer" class="sel" aria-label="Période">${[['7', '7 derniers jours'], ['30', '30 derniers jours'], ['90', '90 derniers jours'], ['mois', 'Mois en cours'], ['moisp', 'Mois précédent'], ['perso', 'Dates choisies']].map(([k, l]) => `<option value="${k}" ${k === S.periode ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        ${S.periode === 'perso' ? `<input type="date" id="meD0" class="sel" value="${S.debut || d0}"><input type="date" id="meD1" class="sel" value="${S.fin || d1}">` : ''}
+        <select id="meSrc" class="sel" aria-label="Source des ventes"><option value="jour" ${S.source === 'jour' ? 'selected' : ''}>Ventes jour par jour</option>${(perImps || []).map(i => `<option value="${i.id}" ${String(i.id) === S.source ? 'selected' : ''}>Fichier ${fmtD(i.periode_debut).replace(/^\w+ /, '')} ${i.periode_debut.slice(0, 4)} → ${fmtD(i.periode_fin).replace(/^\w+ /, '')} ${i.periode_fin.slice(0, 4)}</option>`).join('')}</select>
+        ${srcImp ? '' : `<select id="mePer" class="sel" aria-label="Période">${[['7', '7 derniers jours'], ['30', '30 derniers jours'], ['90', '90 derniers jours'], ['mois', 'Mois en cours'], ['moisp', 'Mois précédent'], ['perso', 'Dates choisies']].map(([k, l]) => `<option value="${k}" ${k === S.periode ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        ${S.periode === 'perso' ? `<input type="date" id="meD0" class="sel" value="${S.debut || d0}"><input type="date" id="meD1" class="sel" value="${S.fin || d1}">` : ''}`}
         <select id="mePv" class="sel" aria-label="Point de vente">${pvs.filter(p => p !== 'BANQUET').map(p => `<option ${p === S.pv ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
         <select id="meCat" class="sel" aria-label="Section de la carte">${cats.map(c => `<option ${c === S.cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-        <span class="hint">${per} · ${jours} jour${jours > 1 ? 's' : ''} de ventes importés</span></div>
+        <span class="hint">${per}${srcImp ? '' : ` · ${jours} jour${jours > 1 ? 's' : ''} de ventes importés`}</span></div>
       ${!N ? `<div class="empty">Aucun article de cette section avec une fiche complète et des ventes sur la période. Complète les fiches dans « Fiches et ratios » ou élargis la période.</div>` : `
       <div class="tiles">
         <div class="tile"><div class="k">CA HT analysé</div><div class="v">${eur(caTot)}</div><div class="s">${fr(qTot)} ventes, ${N} articles</div></div>
@@ -99,7 +104,8 @@
         <div class="tbl"><table class="t"><tbody>${sansFiche.sort((a, b) => b.q - a.q).map(x => `<tr><td>${esc(x.f.produit)}${x.f.variante ? ' · ' + esc(x.f.variante) : ''}</td><td class="n">${fr(x.q)} vente${x.q > 1 ? 's' : ''}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
       <span class="hint">Prix moyen HT = CA net HT encaissé ÷ quantité (remises déduites). Seuls les articles vendus sur la période entrent dans le calcul ; plus la période est longue, plus le classement est fiable (30 jours minimum conseillés). Coût = fiche technique × prix d'achat du dernier stock importé. Ventes issues des imports « Analyse des ventes » (jours non importés absents).</span>`;
     const re = () => vue(M);
-    M.querySelector('#mePer').onchange = e => { S.periode = e.target.value; re(); };
+    M.querySelector('#meSrc').onchange = e => { S.source = e.target.value; re(); };
+    const mp = M.querySelector('#mePer'); if (mp) mp.onchange = e => { S.periode = e.target.value; re(); };
     const a0 = M.querySelector('#meD0'), a1 = M.querySelector('#meD1');
     if (a0) a0.onchange = () => { S.debut = a0.value; S.fin = a1.value; re(); };
     if (a1) a1.onchange = () => { S.debut = a0.value; S.fin = a1.value; re(); };
