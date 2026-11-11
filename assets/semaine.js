@@ -5,7 +5,7 @@
   const T = () => window.BarTirage;
   const U = { litres: 'L', bouteilles: 'btl', pieces: 'pc' };
   const JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-  let lundiSel = null, ouverts = new Set();
+  let lundiSel = null, ouverts = new Set(), jOuverts = new Set();
 
   async function semaine(M) {
     const { sb, esc, fr, eur, fmtDT, todayParis } = C();
@@ -73,11 +73,15 @@
       const ligne = r => { const v = varia[d + '|' + r.article.id];
         return `<tr class="${r.hors ? 'h' : ''}"><td>${esc(r.article.nom_court)}${r.article.type === 'canette' ? ' <span class="hint">canette</span>' : ''}</td><td class="n">${r.complet ? fr(r.total, 3) : '–'}</td><td class="n">${r.theo === null ? '–' : fr(r.theo, 3)}</td><td class="n">${cellE(r)}</td><td class="n">${r.ev === null ? '–' : eur(r.ev)}</td>
           <td class="n">${!v ? '<span class="hint">1er</span>' : `${v.v > 0 ? '+' : ''}${fr(v.v, 3)}`}</td><td>${pill(r.statut)}</td><td>${r.cause ? esc(r.cause.cause) + (r.cause.note ? `<div class="hint">${esc(r.cause.note)}</div>` : '') : r.hors ? '<span style="color:var(--bad);font-weight:700">à renseigner</span>' : ''}</td></tr>`; };
-      return `<div class="sj ${h.length ? 'alerte' : 'net'}">${tete}<div class="sj-k"><span>Validé à ${fmtDT(c.valide_le).split(' à ')[1]}</span><span>${rows.length} articles</span><span>${(c.recompte_ids || []).length} recompte${(c.recompte_ids || []).length > 1 ? 's' : ''}</span></div></div>
-        <div class="sj-r"><b class="${h.length ? 'neg' : ''}">${h.length ? `${h.length} écart${h.length > 1 ? 's' : ''} hors seuil` : 'Tout est conforme'}</b>${h.length ? `<span class="${ev < 0 ? 'neg' : ''}">${eur(ev)}</span>` : ''}</div>
+      const deplie = jOuverts.has(d);
+      return `<div class="sj ${h.length ? 'alerte' : 'net'}"><button class="sj-tog" data-jour="${d}" aria-expanded="${deplie}">
+          <span class="chev">${deplie ? '▾' : '▸'}</span><b class="sj-d">${JOURS[i]} ${Number(d.slice(8))}/${d.slice(5, 7)}</b>${salsa ? ' <span class="pill" style="background:#7b2d6b;color:#fff">Salsa la veille</span>' : ''}
+          <span class="sj-res ${h.length ? 'neg' : 'okc'}">${h.length ? `${h.length} écart${h.length > 1 ? 's' : ''} hors seuil · ${eur(ev)}` : 'Tout est conforme'}</span>
+          <span class="sj-k">Validé à ${fmtDT(c.valide_le).split(' à ')[1]} · ${rows.length} articles · ${(c.recompte_ids || []).length} recompte${(c.recompte_ids || []).length > 1 ? 's' : ''}</span></button>
+        ${!deplie ? '' : `
         ${h.length ? `<div class="tbl"><table class="t sj-t"><thead><tr><th>Article</th><th class="n">Compté</th><th class="n">Théorique</th><th class="n">Écart</th><th class="n">€</th><th class="n">Variation</th><th>Statut</th><th>Cause</th></tr></thead><tbody>${h.map(ligne).join('')}</tbody></table></div>` : ''}
         ${ok.length ? `<button class="btn ghost sm" data-ouvre="${d}">${ouvert ? 'Masquer' : 'Voir'} ${ok.length > 1 ? `les ${ok.length} articles conformes` : 'l’article conforme'}</button>` : ''}
-        ${ouvert && ok.length ? `<div class="tbl"><table class="t sj-t"><tbody>${ok.map(ligne).join('')}</tbody></table></div>` : ''}</div>`;
+        ${ouvert && ok.length ? `<div class="tbl"><table class="t sj-t"><tbody>${ok.map(ligne).join('')}</tbody></table></div>` : ''}`}</div>`;
     };
 
     M.innerHTML = `<div class="main-h"><div><h2>Synthèse de la semaine</h2><p>Du lundi ${Number(lun.slice(8))}/${lun.slice(5, 7)} au dimanche ${Number(dim.slice(8))}/${dim.slice(5, 7)}. Chaque jour compté avec ses écarts hors seuil ; « Variation » = ce qui a bougé depuis le comptage précédent de l'article.</p></div>
@@ -104,9 +108,13 @@
       ${recurrents.length ? `<div class="card"><h3>Écarts qui reviennent cette semaine</h3><div class="tbl"><table class="t"><thead><tr><th>Article</th><th class="n">Jours hors seuil</th><th>Détail</th></tr></thead><tbody>
         ${recurrents.map(x => `<tr><td><b>${esc(x.a.nom_court)}</b></td><td class="n">${x.jours.length}</td><td>${x.jours.map(r => `${JOURS[T().isoDow(r.d) - 1].slice(0, 3)}. ${r.e > 0 ? '+' : ''}${fr(r.e, 3)} ${U[r.article.unite]}`).join(' · ')}</td></tr>`).join('')}
         </tbody></table></div><span class="hint">Un écart identique tous les jours (variation proche de 0) est un ancien écart pas corrigé dans Bizzon. Un écart qui grossit signale une fuite en cours.</span></div>` : ''}
+      <div class="main-h" style="align-items:center;margin-top:4px"><h3>Jour par jour</h3><div class="nav-sem"><button class="btn ghost sm" id="toutOuvrir">Tout déplier</button><button class="btn ghost sm" id="toutFermer">Tout replier</button></div></div>
       <div class="sj-list">${jours.map(carteJour).join('')}</div>`;
     M.querySelector('#semPrev').onclick = () => { lundiSel = T().addDays(lun, -7); semaine(M); };
     M.querySelector('#semNext').onclick = () => { lundiSel = T().addDays(lun, 7); semaine(M); };
+    M.querySelectorAll('[data-jour]').forEach(b => b.onclick = () => { const d = b.dataset.jour; jOuverts.has(d) ? jOuverts.delete(d) : jOuverts.add(d); semaine(M); });
+    M.querySelector('#toutOuvrir').onclick = () => { jours.forEach(d => jOuverts.add(d)); semaine(M); };
+    M.querySelector('#toutFermer').onclick = () => { jOuverts.clear(); semaine(M); };
     M.querySelectorAll('[data-ouvre]').forEach(b => b.onclick = () => { const d = b.dataset.ouvre; ouverts.has(d) ? ouverts.delete(d) : ouverts.add(d); semaine(M); });
   }
 
