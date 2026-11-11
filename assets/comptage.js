@@ -482,5 +482,5 @@
     const g = el.querySelector('#goEc'); if (g) g.onclick = voirEcarts;
   }
 
-  Object.assign(window.BarViews = window.BarViews || {}, { phone, ecarts, calendrier: calendrierView, statutDuJour });
+  Object.assign(window.BarViews = window.BarViews || {}, { phone, ecarts, calendrier: calendrierView, statutDuJour, calculerEcarts });
 })();
