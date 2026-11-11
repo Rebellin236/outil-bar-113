@@ -104,7 +104,7 @@
   function cout(lignes, prix) {
     let c = 0, manque = [];
     for (const l of lignes) {
-      const p = prix[l.nom_bizzon];
+      const p = l.prix_unitaire !== null && l.prix_unitaire !== undefined ? { prix: l.prix_unitaire } : prix[l.nom_bizzon];
       if (l.quantite === null || l.quantite === undefined) { manque.push('quantité'); continue; }
       if (!p) { manque.push(l.nom_bizzon); continue; }
       c += Number(l.quantite) * Number(p.prix);
@@ -181,6 +181,8 @@
     const cats = [...new Set(rows.map(r => r.f.categorie || 'Sans catégorie'))].sort();
     const vis = rows.filter(r => (!F.cat || (r.f.categorie || 'Sans catégorie') === F.cat) && (!F.statut || r.f.statut === F.statut) && (!F.q || (r.f.produit + ' ' + r.f.variante + ' ' + r.ls.map(l => l.nom_bizzon).join(' ')).toLowerCase().includes(F.q.toLowerCase())))
       .sort((a, b) => F.tri === 'ratio' ? (b.ratio ?? -1) - (a.ratio ?? -1) : F.tri === 'marge' ? (a.marge ?? 1e9) - (b.marge ?? 1e9) : a.f.produit.localeCompare(b.f.produit));
+    F.liste = vis.slice(0, 400).map(r => r.f.id); F.cible = cible;
+    F.libres = [...new Map((lignes || []).filter(l => l.unite_libre).map(l => [l.nom_bizzon, l])).values()];
     const nb = s => rows.filter(r => r.f.statut === s).length;
     const avecRatio = rows.filter(r => r.ratio !== null), auDessus = avecRatio.filter(r => r.ratio > cible);
     const compo = r => r.ls.length ? r.ls.map(l => `${l.note ? esc(l.note) : fr(l.quantite, 3)} · ${esc(l.nom_bizzon)}`).join('<br>') : `<span class="hint">${esc(r.f.remarque || 'Aucune composition')}</span>`;
@@ -212,23 +214,51 @@
     M.querySelector('#fst').onchange = e => { F.statut = e.target.value; re(); };
     M.querySelector('#ftri').onchange = e => { F.tri = e.target.value; re(); };
     M.querySelector('#cible').onchange = async e => { const v = Number(e.target.value); if (!(v > 0)) return; await sb.from('bar_reglages').upsert({ cle: 'ratio_cible', valeur: v }, { onConflict: 'cle' }); re(); };
-    M.querySelectorAll('tr[data-f]').forEach(tr => tr.onclick = () => { F.ouvert = F.ouvert === +tr.dataset.f ? null : +tr.dataset.f; re(); });
+    M.querySelectorAll('tr[data-f]').forEach(tr => tr.onclick = () => { F.ouvert = F.ouvert === +tr.dataset.f ? null : +tr.dataset.f; re().then(() => { const f = document.getElementById('feQ'); if (f) f.focus(); }); });
     const ed = M.querySelector('tr.edit'); if (ed) bindEditeur(ed, rows.find(r => r.f.id === F.ouvert), st.lignes, prix, re);
   }
 
+  /* ---------- Éditeur de fiche : recherche au fil de la frappe, dose dans l'unité naturelle (cl, g, pièce) ---------- */
+  const sansAccent = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  // Base de conversion d'un article de stock : combien d'unités « naturelles » dans une unité de stock
+  function base(nom, unite) {
+    if (/kilogram/.test(unite || '')) return { mode: 'g', par: 1000 };
+    if (/liter/.test(unite || '')) return { mode: 'cl', par: 100 };
+    const vol = volumeCl(nom);
+    return vol ? { mode: 'cl', par: vol } : { mode: 'pièce', par: 1 };
+  }
+  const PAR_LIBRE = { g: 1000, cl: 100, 'pièce': 1 };
+  function enDose(l, stock) {
+    if (l.unite_libre) { const par = PAR_LIBRE[l.unite_libre]; return { s: { prix: l.prix_unitaire ?? undefined, unite: 'hors stock' }, mode: l.unite_libre, par, libre: true, dose: l.quantite === null || l.quantite === undefined ? null : +(l.quantite * par).toFixed(3) }; }
+    const s = stock.find(x => x.nom_bizzon === l.nom_bizzon) || {};
+    const b = base(l.nom_bizzon, s.unite);
+    const mode = l.mode || (l.note && /^1 /.test(l.note) ? 'pièce' : b.mode);
+    const par = mode === 'pièce' ? 1 : mode === 'g' ? (b.mode === 'g' ? 1000 : null) : (b.mode === 'cl' ? b.par : (l.contenance || null));
+    return { s, mode, par, dose: l.quantite === null || l.quantite === undefined || !par ? null : +(l.quantite * par).toFixed(3) };
+  }
+
   function editeur(r, stock) {
-    const { esc, fr } = C();
+    const { esc, fr, eur } = C();
     const L = (r._edit = r._edit || r.ls.map(l => ({ ...l })));
-    return `<div class="fe"><div class="fe-h"><b>${esc(r.f.produit)}${r.f.variante ? ' · ' + esc(r.f.variante) : ''}</b>${r.f.remarque ? `<span class="pill p-warn">${esc(r.f.remarque)}</span>` : ''}</div>
-      <table class="t"><thead><tr><th>Article de stock</th><th class="n">Contenance</th><th class="n">Dose en cl</th><th class="n">Quantité (unité de stock)</th><th class="n">Prix d'achat</th><th></th></tr></thead><tbody>
-      ${L.map((l, i) => { const vol = volumeCl(l.nom_bizzon); return `<tr><td>${esc(l.nom_bizzon)}</td><td class="n hint">${vol ? fr(vol) + ' cl' : '?'}</td>
-        <td class="n">${vol ? `<input data-cl="${i}" inputmode="decimal" value="${l.quantite === null ? '' : fr(l.quantite * vol, 2)}" aria-label="Dose en cl">` : '–'}</td>
-        <td class="n"><input data-q="${i}" inputmode="decimal" value="${l.quantite === null ? '' : fr(l.quantite, 4)}" aria-label="Quantité"></td>
-        <td class="n">${C().eur((stock.find(s => s.nom_bizzon === l.nom_bizzon) || {}).prix ?? NaN).replace('NaN', '–')}</td>
-        <td><button class="btn ghost sm" data-del="${i}">Retirer</button></td></tr>`; }).join('')}
-      </tbody></table>
-      <div class="fe-add"><input id="feQ" class="sel" placeholder="Ajouter un composant : tape 2 lettres…" style="font-weight:500;min-width:300px" autocomplete="off"><div id="feRes" class="fe-res"></div></div>
-      <div class="fe-act"><button class="btn brass" id="feOk">Enregistrer et valider la fiche</button><button class="btn ghost" id="feNo">Annuler</button></div></div>`;
+    let total = 0, complet = L.length > 0;
+    const lignes = L.map((l, i) => {
+      const d = enDose(l, stock), c = l.quantite !== null && l.quantite !== undefined && d.s.prix !== undefined ? l.quantite * Number(d.s.prix) : null;
+      if (c === null) complet = false; else total += c;
+      const lib = d.libre ? `<div class="hint">hors stock Bizzon · prix d'achat HT <input data-pu="${i}" inputmode="decimal" value="${l.prix_unitaire ?? ''}" placeholder="prix" style="width:70px"> € ${l.unite_libre === 'g' ? 'le kg' : l.unite_libre === 'cl' ? 'le litre' : 'la pièce'}</div>` : '';
+      return `<tr><td><b>${esc(l.nom_bizzon)}</b>${lib || `<div class="hint">${esc(d.s.unite || 'article absent du dernier stock')}${d.s.prix !== undefined ? ' · ' + eur(Number(d.s.prix)) : ''}</div>`}</td>
+        <td class="n"><input data-dose="${i}" inputmode="decimal" value="${d.dose === null ? '' : fr(d.dose, 3)}" aria-label="Dose" placeholder="dose"></td>
+        <td><select data-mode="${i}" aria-label="Unité">${['cl', 'pièce', 'g'].map(m => `<option ${m === d.mode ? 'selected' : ''}>${m}</option>`).join('')}</select>
+          ${d.mode === 'cl' && !d.par ? `<input data-cont="${i}" inputmode="decimal" placeholder="contenance cl" style="width:110px" aria-label="Contenance de la bouteille en cl">` : ''}</td>
+        <td class="n">${c === null ? '–' : eur(c)}</td><td><button class="btn ghost sm" data-del="${i}" aria-label="Retirer">✕</button></td></tr>`;
+    }).join('');
+    const ht = r.ht, ratio = complet && ht ? total / ht * 100 : null;
+    const idx = (F.liste || []).indexOf(r.f.id), suivant = idx >= 0 && idx < F.liste.length - 1;
+    return `<div class="fe"><div class="fe-h"><b>${esc(r.f.produit)}${r.f.variante ? ' · ' + esc(r.f.variante) : ''}</b><span class="hint">${r.f.prix_ttc !== null ? eur(r.f.prix_ttc) + ' TTC · ' + eur(ht) + ' HT' : 'prix de vente absent'}</span>${r.f.remarque ? `<span class="pill p-warn">${esc(r.f.remarque)}</span>` : ''}</div>
+      <div class="fe-add"><input id="feQ" class="sel" placeholder="Ajouter un ingrédient : tape quelques lettres (ex. hav, sirop canne, citron)… puis Entrée" autocomplete="off" value="${esc(r._q || '')}"><div id="feRes" class="fe-res"></div></div>
+      ${L.length ? `<table class="t"><thead><tr><th>Ingrédient (article de stock)</th><th class="n">Dose</th><th>Unité</th><th class="n">Coût HT</th><th></th></tr></thead><tbody>${lignes}</tbody>
+        <tfoot><tr><td><b>Total</b></td><td></td><td></td><td class="n"><b>${complet ? eur(total) : '–'}</b></td><td></td></tr></tfoot></table>` : '<span class="hint">Aucun ingrédient pour l’instant.</span>'}
+      <div class="fe-tot"><span>Coût matière <b>${complet ? eur(total) : '–'}</b></span><span>Ratio <b class="${ratio !== null && ratio > F.cible ? 'neg' : ''}">${ratio === null ? '–' : fr(ratio, 1) + ' %'}</b></span><span>Marge HT <b>${complet && ht ? eur(ht - total) : '–'}</b></span></div>
+      <div class="fe-act">${suivant ? '<button class="btn brass" id="feNext">Valider et passer à la suivante ›</button>' : ''}<button class="btn ${suivant ? '' : 'brass'}" id="feOk">Valider la fiche</button><button class="btn ghost" id="feNo">Annuler</button></div></div>`;
   }
 
   function bindEditeur(el, r, stock, prix, re) {
@@ -236,28 +266,52 @@
     const L = r._edit;
     const num = v => { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : null; };
     el.onclick = e => e.stopPropagation();
-    el.querySelectorAll('[data-cl]').forEach(i => i.onchange = () => { const l = L[+i.dataset.cl], v = num(i.value), vol = volumeCl(l.nom_bizzon); l.quantite = v === null ? null : +(v / vol).toFixed(4); l.note = v === null ? null : `${String(v).replace('.', ',')} cl`; redraw(); });
-    el.querySelectorAll('[data-q]').forEach(i => i.onchange = () => { const l = L[+i.dataset.q]; l.quantite = num(i.value); l.note = null; redraw(); });
+    const majQ = (i) => { const l = L[i], d = enDose(l, stock), v = num(el.querySelector(`[data-dose="${i}"]`).value);
+      l.quantite = v === null || !d.par ? null : +(v / d.par).toFixed(5); l.note = v === null ? null : `${String(v).replace('.', ',')} ${d.mode}`; };
+    el.querySelectorAll('[data-dose]').forEach(inp => {
+      inp.onchange = () => { if (inp.dataset.fait) return; inp.dataset.fait = 1; majQ(+inp.dataset.dose); r._focus = null; redraw(); };
+      inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (inp.dataset.fait) return; inp.dataset.fait = 1; majQ(+inp.dataset.dose); r._focus = 'q'; redraw(); } };
+    });
+    el.querySelectorAll('[data-pu]').forEach(inp => inp.onchange = () => { L[+inp.dataset.pu].prix_unitaire = num(inp.value); redraw(); });
+    el.querySelectorAll('[data-mode]').forEach(sl => sl.onchange = () => { const i = +sl.dataset.mode, l = L[i], d = enDose(l, stock); const v = d.dose; if (l.unite_libre) { l.unite_libre = sl.value; } else l.mode = sl.value; const d2 = enDose(l, stock); l.quantite = v === null || !d2.par ? null : +(v / d2.par).toFixed(5); l.note = v === null ? null : `${String(v).replace('.', ',')} ${l.unite_libre || l.mode}`; redraw(); });
+    el.querySelectorAll('[data-cont]').forEach(inp => inp.onchange = () => { const l = L[+inp.dataset.cont]; l.contenance = num(inp.value); redraw(); });
     el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { L.splice(+b.dataset.del, 1); redraw(); });
     const q = el.querySelector('#feQ'), res = el.querySelector('#feRes');
-    q.oninput = () => {
-      const t = q.value.trim().toLowerCase();
-      if (t.length < 2) { res.innerHTML = ''; return; }
-      const hits = stock.filter(s => s.nom_bizzon.toLowerCase().includes(t)).slice(0, 8);
-      res.innerHTML = hits.map((s, i) => `<button data-h="${i}">${esc(s.nom_bizzon)} <span class="hint">${esc(s.unite || '')}</span></button>`).join('') || '<span class="hint">Aucun article de stock</span>';
-      res.querySelectorAll('[data-h]').forEach(b => b.onclick = () => { const s = hits[+b.dataset.h]; L.push({ nom_bizzon: s.nom_bizzon, quantite: null, note: null }); redraw(); });
+    let hits = [];
+    const chercher = () => {
+      r._q = q.value;
+      const mots = sansAccent(q.value).split(/\s+/).filter(Boolean);
+      if (!mots.length || mots.join('').length < 2) { res.innerHTML = ''; hits = []; return; }
+      const libres = (F.libres || []).filter(x => mots.every(m => sansAccent(x.nom_bizzon).includes(m))).slice(0, 4);
+      hits = libres.map(x => ({ ...x, libre: true })).concat(stock.filter(s => { const n = sansAccent(s.nom_bizzon); return mots.every(m => n.includes(m)); }).slice(0, 10));
+      res.innerHTML = hits.map((s, i) => `<button data-h="${i}" class="${i === 0 ? 'first' : ''}">${esc(s.nom_bizzon)} <span class="hint">${s.libre ? `hors stock · ${C().eur(Number(s.prix_unitaire))} ${s.unite_libre === 'g' ? '/kg' : s.unite_libre === 'cl' ? '/L' : '/pièce'}` : esc((s.unite || '').replace('1.000 ', ''))}</span></button>`).join('')
+        + `<button data-libre="1" class="libre">＋ « ${esc(q.value.trim())} » hors stock Bizzon (prix à saisir)</button>`;
+      res.querySelectorAll('[data-h]').forEach(b => b.onclick = () => ajouter(hits[+b.dataset.h]));
+      res.querySelector('[data-libre]').onclick = () => { L.push({ nom_bizzon: q.value.trim().toLowerCase(), quantite: null, note: null, unite_libre: 'g', prix_unitaire: null }); r._q = ''; r._focus = L.length - 1; redraw(); };
+    };
+    const ajouter = s => { L.push(s.libre ? { nom_bizzon: s.nom_bizzon, quantite: null, note: null, unite_libre: s.unite_libre, prix_unitaire: s.prix_unitaire } : { nom_bizzon: s.nom_bizzon, quantite: null, note: null }); r._q = ''; r._focus = L.length - 1; redraw(); };
+    q.oninput = chercher;
+    q.onkeydown = e => { if (e.key === 'Enter' && hits[0]) { e.preventDefault(); ajouter(hits[0]); } };
+    if (q.value) chercher();
+    const enregistrer = async () => {
+      if (!L.length) { toast('Ajoute au moins un ingrédient'); return false; }
+      if (L.some(l => l.quantite === null || l.quantite === undefined || !(l.quantite >= 0))) { toast('Une dose manque'); return false; }
+      if (L.some(l => l.unite_libre && !(l.prix_unitaire > 0))) { toast('Saisis le prix d’achat de l’ingrédient hors stock'); return false; }
+      const { error: e1 } = await sb.from('bar_fiche_lignes').delete().eq('fiche_id', r.f.id);
+      const { error: e2 } = e1 ? { error: e1 } : await sb.from('bar_fiche_lignes').insert(L.map(l => ({ fiche_id: r.f.id, nom_bizzon: l.nom_bizzon, quantite: l.quantite, note: l.note || null, ...(l.unite_libre ? { unite_libre: l.unite_libre, prix_unitaire: l.prix_unitaire } : {}) })));
+      const { error: e3 } = e2 ? { error: e2 } : await sb.from('bar_fiches').update({ statut: 'validee', remarque: null, maj_le: new Date().toISOString() }).eq('id', r.f.id);
+      if (e3) { toast(/prix_unitaire|unite_libre/.test(e3.message) ? 'Lance le script SQL 06 dans Supabase pour les ingrédients hors stock.' : 'Non enregistré : ' + e3.message); return false; }
+      return true;
     };
     el.querySelector('#feNo').onclick = () => { delete r._edit; F.ouvert = null; re(); };
-    el.querySelector('#feOk').onclick = async () => {
-      if (!L.length) { toast('Ajoute au moins un composant'); return; }
-      if (L.some(l => l.quantite === null || !(l.quantite >= 0))) { toast('Une quantité manque'); return; }
-      const { error: e1 } = await sb.from('bar_fiche_lignes').delete().eq('fiche_id', r.f.id);
-      const { error: e2 } = e1 ? { error: e1 } : await sb.from('bar_fiche_lignes').insert(L.map(l => ({ fiche_id: r.f.id, nom_bizzon: l.nom_bizzon, quantite: l.quantite, note: l.note || null })));
-      const { error: e3 } = e2 ? { error: e2 } : await sb.from('bar_fiches').update({ statut: 'validee', remarque: null, maj_le: new Date().toISOString() }).eq('id', r.f.id);
-      if (e3) { toast('Non enregistré : ' + e3.message); return; }
-      toast('Fiche validée'); F.ouvert = null; re();
-    };
-    function redraw() { const tr = el; tr.querySelector('td').innerHTML = editeur(r, stock); bindEditeur(tr, r, stock, prix, re); }
+    el.querySelector('#feOk').onclick = async () => { if (await enregistrer()) { toast('Fiche validée'); F.ouvert = null; re(); } };
+    const nx = el.querySelector('#feNext');
+    if (nx) nx.onclick = async () => { const idx = F.liste.indexOf(r.f.id), next = F.liste[idx + 1]; if (await enregistrer()) { toast('Fiche validée'); F.ouvert = next; re().then(() => { const o = document.querySelector('tr.open'); if (o) o.scrollIntoView({ block: 'start', behavior: 'smooth' }); const f = document.getElementById('feQ'); if (f) f.focus(); }); } };
+    // Focus : après l'ajout d'un ingrédient on saisit sa dose ; après la dose on revient à la recherche
+    if (typeof r._focus === 'number') { const d = el.querySelector(`[data-dose="${r._focus}"]`); if (d) { d.focus(); d.select(); } }
+    else if (r._focus === 'q') q.focus();
+    r._focus = null;
+    function redraw() { if (r._dessin) return; r._dessin = true; try { el.querySelector('td').innerHTML = editeur(r, stock); } finally { r._dessin = false; } bindEditeur(el, r, stock, prix, re); }
   }
 
   root.BarFiches.vue = vue;
