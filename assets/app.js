@@ -71,7 +71,7 @@
 
   /* ---------------- Poste (admin) ---------------- */
   const NAV = [
-    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts', true], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['week', 'Synthèse du lundi']]],
+    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts', true], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['fiches', 'Fiches et ratios', true], ['week', 'Synthèse du lundi']]],
     ['Équipe', [['pertes', 'Pertes', true], ['taches', 'Tâches et codes', true]]],
     ['Données', [['imports', 'Historique des imports', true]]],
     ['Réglages', [['rot', 'Rotation Bar'], ['cal', 'Calendrier', true], ['seuils', 'Seuils et alertes'], ['dlc', 'Durées après ouverture']]]
@@ -80,7 +80,7 @@
   function renderDesk(sec) {
     if (sec) section = sec;
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 22</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 23</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button data-sec="${k}" ${on ? (k === section ? 'aria-current="page"' : '') : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -91,6 +91,7 @@
     if (section === 'cal') return window.BarViews.calendrier($('#main'));
     if (section === 'pertes') return window.BarViews.pertes($('#main'));
     if (section === 'taches') return window.BarViews.taches($('#main'));
+    if (section === 'fiches') return window.BarFiches.vue($('#main'));
     if (section === 'imports') {
       $('#main').innerHTML = `<div class="main-h"><div><h2>Historique des imports</h2><p>Les 60 derniers fichiers Bizzon importés. Pour importer, passe par la page Aujourd'hui.</p></div></div><div id="hist"><div class="hint">Chargement…</div></div>`;
       return renderHist();
@@ -124,7 +125,8 @@
       try {
         const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
         const type = BarImport.detectType(wb);
-        if (!type) throw new Error("Fichier non reconnu : ni Stock théorique, ni Analyse des ventes.");
+        if (!type) throw new Error("Fichier non reconnu : ni Stock théorique, ni Analyse des ventes, ni Produits à vendre.");
+        if (type === 'produits') { const r = BarImport.parseProduits(XLSX, wb); r.fichier = f.name; line.textContent = `${f.name} : création des fiches…`; line.className = 'ok'; line.textContent = await window.BarFiches.importerProduits(r); continue; }
         const res = type === 'stock' ? BarImport.parseStock(XLSX, wb, f.name) : BarImport.parseVentes(XLSX, wb, f.name);
         if (type === 'ventes') selDay = res.periode.debut;   // on affiche directement le jour importé
         const msg = await saveImport(res, f.name);
@@ -272,8 +274,8 @@
     const el = $('#hist'); if (!el) return;
     if (!imps || !imps.length) { el.innerHTML = '<div class="empty">Aucun import pour l\'instant.</div>'; return; }
     el.innerHTML = `<div class="card"><div class="tbl"><table class="t"><thead><tr><th>Type</th><th>Contenu</th><th class="n">Lignes</th><th>Fichier</th><th>Importé le</th><th></th></tr></thead><tbody>
-      ${imps.map(i => `<tr><td>${i.type === 'stock' ? 'Stock théorique' : 'Ventes'}</td>
-        <td>${i.type === 'stock' ? 'exporté le ' + fmtDT(i.exporte_le) : (i.periode_debut === i.periode_fin ? fmtD(i.periode_debut) : `<span class="pill p-bad">plusieurs jours : faux</span> ${i.periode_debut} → ${i.periode_fin}`)}</td>
+      ${imps.map(i => `<tr><td>${i.type === 'stock' ? 'Stock théorique' : i.type === 'produits' ? 'Produits à vendre' : 'Ventes'}</td>
+        <td>${i.type === 'produits' ? 'prix de vente et fiches' : i.type === 'stock' ? 'exporté le ' + fmtDT(i.exporte_le) : (i.periode_debut === i.periode_fin ? fmtD(i.periode_debut) : `<span class="pill p-bad">plusieurs jours : faux</span> ${i.periode_debut} → ${i.periode_fin}`)}</td>
         <td class="n">${i.nb_lignes ?? '–'}</td><td class="hint">${esc(i.fichier || '')}</td><td>${fmtDT(i.importe_le)}</td>
         <td><button class="btn ghost sm" data-del="${i.id}">Supprimer</button></td></tr>`).join('')}
       </tbody></table></div><span class="hint">Supprimer un import efface aussi toutes ses lignes. Tu peux ensuite réimporter le bon fichier.</span></div>`;

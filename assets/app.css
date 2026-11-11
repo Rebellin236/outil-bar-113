@@ -250,3 +250,21 @@ html,body,.ph,.ph button{touch-action:manipulation}
 .tgrid td.tc,.tgrid th.tc{text-align:center;white-space:nowrap}
 .tc small{display:block;font-size:10.5px;color:var(--muted);font-weight:500}
 td.tc.ok{color:var(--ok);font-weight:800}td.tc.ko{color:var(--bad);background:var(--bad-soft);font-weight:800}td.tc.wait{color:var(--muted);font-size:12px}
+
+/* ===== Fiches et ratios ===== */
+.filtres{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+table.fiches td{vertical-align:top}
+table.fiches tr[data-f]{cursor:pointer}
+table.fiches tr[data-f]:hover td{background:var(--raised)}
+table.fiches tr.open td{background:var(--brass-soft)}
+table.fiches td.compo{font-size:12.5px;color:var(--muted);max-width:340px}
+table.fiches tr.edit>td{background:var(--raised);padding:14px}
+.fe{display:flex;flex-direction:column;gap:12px}
+.fe-h{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.fe input[data-cl],.fe input[data-q]{width:90px;font:600 13px var(--mono);padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);text-align:right}
+.fe-add{display:flex;flex-direction:column;gap:6px}
+.fe-res{display:flex;flex-wrap:wrap;gap:6px}
+.fe-res button{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px;text-align:left}
+.fe-act{display:flex;gap:8px}
+table.fiches td.compo{white-space:normal;word-break:break-word;min-width:220px}
+table.fiches td:first-child{white-space:normal;min-width:160px}

@@ -25,6 +25,7 @@
   function detectType(wb) {
     if (wb.SheetNames.includes('ECONOMAT GENERAL')) return 'stock';
     if (wb.SheetNames.some(n => /analyse des ventes/i.test(n))) return 'ventes';
+    if (wb.SheetNames.includes('Produits')) return 'produits';
     return null;
   }
 
@@ -147,7 +148,31 @@
     return { parPV, horsPerimetre };
   }
 
-  const api = { detectType, parseStock, parseVentes, syntheseVentes, parseExportDate, parsePeriode };
+  // Export Bizzon « Produits à vendre » : une ligne par produit, les variantes (Verre-6.0,Bouteille-25.0) éclatées
+  function parseProduits(XLSX, wb) {
+    const a = XLSX.utils.sheet_to_json(wb.Sheets.Produits, { header: 1, defval: '', raw: true });
+    const h = a[0] || [];
+    const c = n => h.indexOf(n);
+    const C = { id: c('Product ID'), nom: c('Product name'), cat: c('Product category'), dispo: c('Make available for sale'), prix: c('Price'), tva: c('Sale tax'), vals: c('Variant - Option values') };
+    if (C.id < 0 || C.nom < 0) throw new Error("Colonnes introuvables : ce fichier ne ressemble pas à l'export Produits à vendre de Bizzon.");
+    const out = [];
+    for (const r of a.slice(1)) {
+      const id = String(r[C.id] || '').trim();
+      if (!/^[0-9a-f-]{20,}$/i.test(id)) continue; // ligne d'aide sous l'en-tête
+      const tva = (m => m ? Number(m[1]) / 100 : null)(/(\d+)/.exec(String(r[C.tva])));
+      const base = { produit_id: id, produit: String(r[C.nom]).trim(), categorie: String(r[C.cat] || '').trim() || null, tva, actif: String(r[C.dispo]).toLowerCase() === 'true' };
+      const vals = String(r[C.vals] || '').trim();
+      if (!vals) { out.push({ ...base, variante: '', prix_ttc: r[C.prix] === '' ? null : Number(String(r[C.prix]).replace(',', '.')) }); continue; }
+      for (const v of vals.split(',')) {
+        const m = /^(.*)-\s*([\d.]+)\s*$/.exec(v.trim());
+        out.push({ ...base, variante: (m ? m[1] : v).trim(), prix_ttc: m ? Number(m[2]) : null });
+      }
+    }
+    if (!out.length) throw new Error('Aucun produit trouvé dans ce fichier.');
+    return { type: 'produits', lignes: out };
+  }
+
+  const api = { detectType, parseProduits, parseStock, parseVentes, syntheseVentes, parseExportDate, parsePeriode };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BarImport = api;
 })(typeof window !== 'undefined' ? window : globalThis);
