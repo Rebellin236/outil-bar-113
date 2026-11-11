@@ -126,7 +126,7 @@
     const { sb } = C();
     const { data: imp } = await sb.from('bar_imports').select('id,exporte_le').eq('type', 'stock').order('exporte_le', { ascending: false }).limit(1);
     if (!imp || !imp[0]) return { imp: null, lignes: [] };
-    const { data } = await sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prix,prevu,vendu').eq('import_id', imp[0].id).limit(5000);
+    const { data } = await C().tout(() => sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prix,prevu,vendu').eq('import_id', imp[0].id).order('id'));
     return { imp: imp[0], lignes: data || [] };
   }
 
@@ -134,7 +134,7 @@
   async function importerProduits(res) {
     const { sb, user } = C();
     const stock = (await dernierStock()).lignes;
-    const { data: exist } = await sb.from('bar_fiches').select('id,produit_id,variante');
+    const { data: exist } = await C().tout(() => sb.from('bar_fiches').select('id,produit_id,variante').order('id'));
     const cle = f => f.produit_id + '|' + f.variante;
     const deja = new Map((exist || []).map(f => [cle(f), f.id]));
     const vus = new Set(res.lignes.map(cle));
@@ -164,8 +164,8 @@
     const { sb, esc, fr, eur, fmtDT, toast } = C();
     M.innerHTML = '<div class="hint">Chargement des fiches…</div>';
     const [{ data: fiches, error }, { data: lignes }, st, { data: reg }] = await Promise.all([
-      sb.from('bar_fiches').select('*').eq('actif', true).order('categorie').order('produit').limit(2000),
-      sb.from('bar_fiche_lignes').select('*').limit(10000),
+      C().tout(() => sb.from('bar_fiches').select('*').eq('actif', true).order('id')),
+      C().tout(() => sb.from('bar_fiche_lignes').select('*').order('id')),
       dernierStock(),
       sb.from('bar_reglages').select('valeur').eq('cle', 'ratio_cible').maybeSingle()]);
     if (error) { M.innerHTML = `<div class="main-h"><div><h2>Fiches et ratios</h2></div></div><div class="empty">${/bar_fiches/.test(error.message) ? 'Lance le script SQL 05 dans Supabase, puis importe l’export « Produits à vendre ».' : esc(error.message)}</div>`; return; }

@@ -80,7 +80,7 @@
   function renderDesk(sec) {
     if (sec) section = sec;
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 30</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 31</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button data-sec="${k}" ${on ? (k === section ? 'aria-current="page"' : '') : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -224,7 +224,7 @@
     const last7 = days.slice(-7);
     const prevWeek = new Date(Date.parse(selDay + 'T12:00:00Z') - 7 * 864e5).toISOString().slice(0, 10);
     const want = [...new Set([...last7, selDay, prevWeek])];
-    const { data: vl } = await sb.from('bar_ventes').select('date_vente,article,centre,point_vente,quantite,net_ht').in('date_vente', want).limit(20000);
+    const { data: vl } = await tout(() => sb.from('bar_ventes').select('date_vente,article,centre,point_vente,quantite,net_ht').in('date_vente', want).order('id'));
     const PV = [['BAR 1.13', 'Bar 1.13'], ['RESTAURANT 1.13', 'Restaurant 1.13'], ['M SHOP', 'Mshop']];
     const synDay = d => BarImport.syntheseVentes((vl || []).filter(l => l.date_vente === d), R.exclusions_ventes);
     const tot = (syn, k) => syn.parPV[k] ? syn.parPV[k].total : 0;
@@ -289,7 +289,17 @@
     });
   }
 
-  window.BarCtx = { sb, $, fr, eur, esc, fmtD, fmtDT, todayParis, TZ, toast, user: () => user, roleName: () => roleName,
+  // L'API Supabase renvoie au plus 1 000 lignes par requête : on lit par pages
+  async function tout(q) {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await q().range(from, from + 999);
+      if (error) return { data: out.length ? out : null, error };
+      out.push(...(data || []));
+      if (!data || data.length < 1000) return { data: out, error: null };
+    }
+  }
+  window.BarCtx = { sb, tout, $, fr, eur, esc, fmtD, fmtDT, todayParis, TZ, toast, user: () => user, roleName: () => roleName,
     poste: () => { location.hash = 'poste'; renderDesk(); }, logout };
   sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') renderLogin(); });
   boot();

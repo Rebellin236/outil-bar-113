@@ -105,7 +105,7 @@
     // Dernier stock théorique importé (« Vendu » y est cumulé depuis le dernier inventaire Bizzon)
     const { data: imps } = await sb.from('bar_imports').select('id').eq('type', 'stock').order('exporte_le', { ascending: false }).limit(1);
     let lignes = [];
-    if (imps && imps[0]) { const { data } = await sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prevu,vendu,prix').eq('import_id', imps[0].id).in('famille', [...fam]); lignes = data || []; }
+    if (imps && imps[0]) { const { data } = await C().tout(() => sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prevu,vendu,prix').eq('import_id', imps[0].id).in('famille', [...fam]).order('id')); lignes = data || []; }
     const ok = l => fam.has(l.famille) && /^1\.000 /.test(l.unite || '') && !exclus.has(l.nom_bizzon);
     let pool = lignes.filter(l => ok(l) && Number(l.vendu) > 0);
     if (pool.length < 15) pool = lignes.filter(l => ok(l) && (Number(l.vendu) > 0 || Number(l.prevu) > 0)); // peu de ventes : articles en stock
