@@ -183,6 +183,7 @@
     const vis = rows.filter(r => (!F.cat || (r.f.categorie || 'Sans catégorie') === F.cat) && (!F.statut || r.f.statut === F.statut) && (!F.q || (r.f.produit + ' ' + r.f.variante + ' ' + r.ls.map(l => l.nom_bizzon).join(' ')).toLowerCase().includes(F.q.toLowerCase())))
       .sort((a, b) => F.tri === 'ratio' ? (b.ratio ?? -1) - (a.ratio ?? -1) : F.tri === 'marge' ? (a.marge ?? 1e9) - (b.marge ?? 1e9) : a.f.produit.localeCompare(b.f.produit));
     F.liste = vis.slice(0, 400).map(r => r.f.id); F.cible = cible;
+    F.avecCompo = rows.filter(x => x.ls.length);
     F.libres = [...new Map((lignes || []).filter(l => l.unite_libre).map(l => [l.nom_bizzon, l])).values()];
     const nb = s => rows.filter(r => r.f.statut === s).length;
     const avecRatio = rows.filter(r => r.ratio !== null), auDessus = avecRatio.filter(r => r.ratio > cible);
@@ -238,6 +239,17 @@
     return { s, mode, par, dose: l.quantite === null || l.quantite === undefined || !par ? null : +(l.quantite * par).toFixed(3) };
   }
 
+  // Fiches proches par le nom (sans « salsa », « de Noël », « formule »…) qui ont déjà une recette
+  const baseNom = t => sansAccent(t).replace(/\b(salsa|de noel|noel|formule|happy hour|hh)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  function copie(r) {
+    const { esc } = C();
+    const b = baseNom(r.f.produit);
+    const proches = (F.avecCompo || []).filter(x => x.f.id !== r.f.id && b && (baseNom(x.f.produit) === b)).slice(0, 4);
+    return `<div class="fe-copie"><span class="hint">Même recette qu'un autre produit ?</span>
+      ${proches.map(x => `<button class="btn sm" data-copie="${x.f.id}">Copier la recette de « ${esc(x.f.produit)}${x.f.variante ? ' · ' + esc(x.f.variante) : ''} »</button>`).join('')}
+      <input id="feCq" class="sel" placeholder="Copier depuis… (tape un nom de produit)" value="${esc(r._cq || '')}" autocomplete="off" style="font-weight:500;min-width:240px"><div id="feCres" class="fe-res"></div></div>`;
+  }
+
   function editeur(r, stock) {
     const { esc, fr, eur } = C();
     const L = (r._edit = r._edit || r.ls.map(l => ({ ...l })));
@@ -255,6 +267,7 @@
     const ht = r.ht, ratio = complet && ht ? total / ht * 100 : null;
     const idx = (F.liste || []).indexOf(r.f.id), suivant = idx >= 0 && idx < F.liste.length - 1;
     return `<div class="fe"><div class="fe-h"><b>${esc(r.f.produit)}${r.f.variante ? ' · ' + esc(r.f.variante) : ''}</b><span class="hint">${r.f.prix_ttc !== null ? eur(r.f.prix_ttc) + ' TTC · ' + eur(ht) + ' HT' : 'prix de vente absent'}</span>${r.f.remarque ? `<span class="pill p-warn">${esc(r.f.remarque)}</span>` : ''}</div>
+      ${copie(r)}
       <div class="fe-add"><input id="feQ" class="sel" placeholder="Ajouter un ingrédient : tape quelques lettres (ex. hav, sirop canne, citron)… puis Entrée" autocomplete="off" value="${esc(r._q || '')}"><div id="feRes" class="fe-res"></div></div>
       ${L.length ? `<table class="t"><thead><tr><th>Ingrédient (article de stock)</th><th class="n">Dose</th><th>Unité</th><th class="n">Coût HT</th><th></th></tr></thead><tbody>${lignes}</tbody>
         <tfoot><tr><td><b>Total</b></td><td></td><td></td><td class="n"><b>${complet ? eur(total) : '–'}</b></td><td></td></tr></tfoot></table>` : '<span class="hint">Aucun ingrédient pour l’instant.</span>'}
@@ -277,6 +290,17 @@
     el.querySelectorAll('[data-mode]').forEach(sl => sl.onchange = () => { const i = +sl.dataset.mode, l = L[i], d = enDose(l, stock); const v = d.dose; if (l.unite_libre) { l.unite_libre = sl.value; } else l.mode = sl.value; const d2 = enDose(l, stock); l.quantite = v === null || !d2.par ? null : +(v / d2.par).toFixed(5); l.note = v === null ? null : `${String(v).replace('.', ',')} ${l.unite_libre || l.mode}`; redraw(); });
     el.querySelectorAll('[data-cont]').forEach(inp => inp.onchange = () => { const l = L[+inp.dataset.cont]; l.contenance = num(inp.value); redraw(); });
     el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { L.splice(+b.dataset.del, 1); redraw(); });
+    // Copier la composition d'une autre fiche (même recette, autre prix : Belle Bette / Belle Bette Salsa…)
+    const prendre = id => { const src = (F.avecCompo || []).find(x => x.f.id === id); if (!src) return;
+      if (L.length && !confirm(`Remplacer les ${L.length} ingrédient(s) actuels par la recette de « ${src.f.produit}${src.f.variante ? ' · ' + src.f.variante : ''} » ?`)) return;
+      L.splice(0, L.length, ...src.ls.map(l => ({ nom_bizzon: l.nom_bizzon, quantite: l.quantite, note: l.note, ...(l.unite_libre ? { unite_libre: l.unite_libre, prix_unitaire: l.prix_unitaire } : {}) })));
+      r._cq = ''; toast(`Recette copiée depuis ${src.f.produit} : vérifie puis valide`); redraw(); };
+    el.querySelectorAll('[data-copie]').forEach(b => b.onclick = () => prendre(+b.dataset.copie));
+    const cq = el.querySelector('#feCq'), cres = el.querySelector('#feCres');
+    if (cq) cq.oninput = () => { r._cq = cq.value; const mots = sansAccent(cq.value).split(/\s+/).filter(Boolean);
+      const hits = mots.join('').length < 2 ? [] : (F.avecCompo || []).filter(x => x.f.id !== r.f.id && mots.every(m => sansAccent(x.f.produit + ' ' + x.f.variante).includes(m))).slice(0, 8);
+      cres.innerHTML = hits.map(x => `<button data-copie="${x.f.id}">${esc(x.f.produit)}${x.f.variante ? ' · ' + esc(x.f.variante) : ''} <span class="hint">${x.ls.length} ingr.</span></button>`).join('') || (mots.length ? '<span class="hint">Aucune fiche avec recette ne correspond</span>' : '');
+      cres.querySelectorAll('[data-copie]').forEach(b => b.onclick = () => prendre(+b.dataset.copie)); };
     const q = el.querySelector('#feQ'), res = el.querySelector('#feRes');
     let hits = [];
     const chercher = () => {
