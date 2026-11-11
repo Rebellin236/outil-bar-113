@@ -71,7 +71,7 @@
 
   /* ---------------- Poste (admin) ---------------- */
   const NAV = [
-    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts', true], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['fiches', 'Fiches et ratios', true], ['week', 'Synthèse de la semaine', true]]],
+    ['Pilotage', [['today', "Aujourd'hui", true], ['ecarts', 'Écarts', true], ['cans', 'Canettes'], ['ventes', 'Ventes'], ['fiches', 'Fiches et ratios', true], ['menu', 'Menu engineering', true], ['week', 'Synthèse de la semaine', true]]],
     ['Équipe', [['pertes', 'Pertes', true], ['taches', 'Tâches et codes', true]]],
     ['Données', [['imports', 'Historique des imports', true]]],
     ['Réglages', [['rot', 'Rotation Bar'], ['cal', 'Calendrier', true], ['seuils', 'Seuils et alertes'], ['dlc', 'Durées après ouverture']]]
@@ -80,7 +80,7 @@
   function renderDesk(sec) {
     if (sec) section = sec;
     app.innerHTML = `<div class="desk"><nav class="side" aria-label="Sections">
-      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 32</div></div></div>
+      <div class="brand"><div class="seal">1.13</div><div><b>Outil Bar</b><div style="font-size:11px;opacity:.6">version 33</div></div></div>
       ${NAV.map(([g, items]) => `<div class="lbl">${g}</div>` + items.map(([k, l, on]) => `<button data-sec="${k}" ${on ? (k === section ? 'aria-current="page"' : '') : 'disabled'}><span>${l}</span>${on ? '' : '<span class="soon">bientôt</span>'}</button>`).join('')).join('')}
       <div class="who"><span>${esc(roleName || user.email)}</span><button class="btn ghost sm" id="out">Déconnexion</button></div>
     </nav><main class="main" id="main"></main></div>`;
@@ -93,6 +93,7 @@
     if (section === 'taches') return window.BarViews.taches($('#main'));
     if (section === 'fiches') return window.BarFiches.vue($('#main'));
     if (section === 'week') return window.BarViews.semaine($('#main'));
+    if (section === 'menu') return window.BarMenu.vue($('#main'));
     if (section === 'imports') {
       $('#main').innerHTML = `<div class="main-h"><div><h2>Historique des imports</h2><p>Les 60 derniers fichiers Bizzon importés. Pour importer, passe par la page Aujourd'hui.</p></div></div><div id="hist"><div class="hint">Chargement…</div></div>`;
       return renderHist();
