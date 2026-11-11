@@ -386,13 +386,13 @@
     // Écart au comptage précédent du même article : ce qui a bougé depuis (si Bizzon n'a pas été corrigé entre-temps)
     const prev = {};
     const ids = rows.map(r => r.article.id);
-    const { data: avant } = await sb.from('bar_tirages').select('date_jour,article_id').in('article_id', ids).lt('date_jour', cpt.date_jour).order('date_jour', { ascending: false }).limit(400);
+    const { data: avant } = await sb.from('bar_tirages').select('date_jour,article_id').in('article_id', ids).lt('date_jour', cpt.date_jour).gte('date_jour', cpt.date_jour.slice(0, 8) + '01').order('date_jour', { ascending: false }).limit(400); // le théorique repart de l'inventaire de fin de mois
     const derniere = {}; (avant || []).forEach(t => { if (!derniere[t.article_id]) derniere[t.article_id] = t.date_jour; });
     for (const d of [...new Set(Object.values(derniere))].slice(0, 12)) {
       const c = cpts.find(x => x.date_jour === d && x.valide_le); if (!c) continue;
       (await calculerEcarts(c.id)).forEach(r => { if (derniere[r.article.id] === d && r.e !== null) prev[r.article.id] = { e: r.e, d }; });
     }
-    const varia = r => { const p = prev[r.article.id]; if (r.e === null) return '–'; if (!p) return '<span class="hint">1er comptage</span>';
+    const varia = r => { const p = prev[r.article.id]; if (r.e === null) return '–'; if (!p) return '<span class="hint">1er du mois</span>';
       const v = +(r.e - p.e).toFixed(3); return `<span class="${v < 0 ? 'neg' : ''}">${v > 0 ? '+' : ''}${fr(v, 3)}</span><div class="hint">vs ${Number(p.d.slice(8))}/${p.d.slice(5, 7)} (${p.e > 0 ? '+' : ''}${fr(p.e, 3)})</div>`; };
     const conf = rows.filter(r => r.statut === 'Écart confirmé' || r.statut === 'À recontrôler');
     const totEv = rows.reduce((s, r) => s + (r.ev || 0), 0);

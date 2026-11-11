@@ -42,7 +42,7 @@
     for (const c of ref) for (const r of ecarts[c.date_jour]) {
       if (r.e === null) continue;
       const p = dernier[r.article.id];
-      varia[c.date_jour + '|' + r.article.id] = p ? { v: +(r.e - p.e).toFixed(3), d: p.d } : null;
+      varia[c.date_jour + '|' + r.article.id] = p && p.d.slice(0, 7) === c.date_jour.slice(0, 7) ? { v: +(r.e - p.e).toFixed(3), d: p.d } : null;
       dernier[r.article.id] = { e: r.e, d: c.date_jour };
     }
     const jours = Array.from({ length: 7 }, (_, i) => T().addDays(lun, i));
@@ -72,7 +72,7 @@
       const ouvert = ouverts.has(d);
       const ligne = r => { const v = varia[d + '|' + r.article.id];
         return `<tr class="${r.hors ? 'h' : ''}"><td>${esc(r.article.nom_court)}${r.article.type === 'canette' ? ' <span class="hint">canette</span>' : ''}</td><td class="n">${r.complet ? fr(r.total, 3) : '–'}</td><td class="n">${r.theo === null ? '–' : fr(r.theo, 3)}</td><td class="n">${cellE(r)}</td><td class="n">${r.ev === null ? '–' : eur(r.ev)}</td>
-          <td class="n">${!v ? '<span class="hint">1er</span>' : `${v.v > 0 ? '+' : ''}${fr(v.v, 3)}`}</td><td>${pill(r.statut)}</td><td>${r.cause ? esc(r.cause.cause) + (r.cause.note ? `<div class="hint">${esc(r.cause.note)}</div>` : '') : r.hors ? '<span style="color:var(--bad);font-weight:700">à renseigner</span>' : ''}</td></tr>`; };
+          <td class="n">${!v ? '<span class="hint">1er du mois</span>' : `${v.v > 0 ? '+' : ''}${fr(v.v, 3)}`}</td><td>${pill(r.statut)}</td><td>${r.cause ? esc(r.cause.cause) + (r.cause.note ? `<div class="hint">${esc(r.cause.note)}</div>` : '') : r.hors ? '<span style="color:var(--bad);font-weight:700">à renseigner</span>' : ''}</td></tr>`; };
       const deplie = jOuverts.has(d);
       return `<div class="sj ${h.length ? 'alerte' : 'net'}"><button class="sj-tog" data-jour="${d}" aria-expanded="${deplie}">
           <span class="chev">${deplie ? '▾' : '▸'}</span><b class="sj-d">${JOURS[i]} ${Number(d.slice(8))}/${d.slice(5, 7)}</b>${salsa ? ' <span class="pill" style="background:#7b2d6b;color:#fff">Salsa la veille</span>' : ''}
