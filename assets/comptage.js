@@ -277,10 +277,10 @@
       <div class="ph-top ph-status"><div class="status ${P.stock ? '' : 'missing'}">${P.stock ? `Stock théorique du jour importé (${fmtDT(P.stock.exporte_le)}) : recompte immédiat actif` : 'Stock du jour pas encore importé : pas de recompte immédiat, les écarts seront calculés après l’import'}</div></div>
       <div class="ph-body">
       <div class="status-warn" id="unsaved" hidden></div>
+      ${P.phase === 'count' && !Object.values(P.vals).some(v => Object.keys(v).length) && !P.pending.size ? `<div class="refaire-box"><span>Stock ou ventes importés après l’ouverture ? Refais la liste avant de compter.</span><button class="btn sm" id="refaire">Refaire la liste du jour</button></div>` : ''}
       ${P.phase === 'recount' ? `<div class="status-warn">${P.comptage.recompte_ids.length} article${P.comptage.recompte_ids.length > 1 ? 's' : ''} à recompter. Recompte les lignes surlignées, sans regarder les autres.</div>` : ''}
       ${table(bar, `Bar · ${bar.length} articles du jour`, 'tirage du jour')}
       ${table(cans, 'Canettes · tous les jours', 'liste fixe')}
-      ${P.phase === 'count' && !Object.values(P.vals).some(v => Object.keys(v).length) && !P.pending.size ? `<button class="btn ghost sm" id="refaire" style="align-self:center">Refaire la liste du jour (nouvelles règles, stock et ventes de la veille à jour)</button>` : ''}
       <p class="hint" style="margin:0 4px">Touche une case : le pavé s'ouvre dessous, « Suivant » descend dans la colonne. Toute la réserve, puis le bar, puis le Mshop. Un emplacement vide se saisit 0.</p>
       <div class="ph-foot"><button class="btn brass" id="valider" ${f < t ? 'disabled' : ''}>${f < t ? `Encore ${t - f} case${t - f > 1 ? 's' : ''} à remplir` : P.phase === 'recount' ? 'Valider le recompte' : 'Valider le comptage'}</button></div>
       ${phFoot()}</div></div>`;
