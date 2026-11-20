@@ -165,7 +165,7 @@
       let x = rngV() * tot, i = 0; for (; i < pw.length - 1; i++) { x -= pw[i]; if (x <= 0) break; }
       veille.push(vPool.splice(i, 1)[0].nom_bizzon);
     }
-    const choixBar = T.tirerBar({ date, nBar: 8 - softs.length, prioritaires: prio, comptesSemaine: comptes, dernierComptage: dernier, joursActifsRestants: restants,
+    const choixBar = T.tirerBar({ date, nBar: Number(R.articles_bar_par_jour ?? 12) - softs.length, prioritaires: prio, comptesSemaine: comptes, dernierComptage: dernier, joursActifsRestants: restants,
       recontrole, salsa, veille, rotation: rotation.filter(r => !softs.includes(r.nom_bizzon) && !veille.includes(r.nom_bizzon)), rng: T.rngDepuis(date) });
     const choix = choixBar.concat(softs.filter(n => !choixBar.some(c => c.nom_bizzon === n)).map(n => ({ nom_bizzon: n, motif: 'rotation' })));
     // Articles de rotation ou de salsa pas encore connus : on les crée
