@@ -77,6 +77,17 @@
     return { comptage: c3, articles: await lireTirage(date) };
   }
 
+  // Refaire le tirage du jour tant que rien n'est saisi (stock ou ventes importés après coup, nouvelles règles)
+  async function refaireTirage(date, cpt) {
+    const { sb } = C();
+    const { data: deja } = await sb.from('bar_comptage_lignes').select('id').eq('comptage_id', cpt.id).limit(1);
+    if (deja && deja.length) throw new Error('Des quantités sont déjà saisies : la liste ne peut plus changer.');
+    await sb.from('bar_tirages').delete().eq('date_jour', date);
+    await calculerTirage(date, cpt);
+    const st = await stockDuJour(date);
+    await sb.from('bar_comptages').update({ tirage_ok: true, import_stock_id: st ? st.id : null, recompte_ids: [] }).eq('id', cpt.id);
+  }
+
   async function calculerTirage(date, cpt) {
     const { sb } = C();
     const R = await reglages();
@@ -269,12 +280,20 @@
       ${P.phase === 'recount' ? `<div class="status-warn">${P.comptage.recompte_ids.length} article${P.comptage.recompte_ids.length > 1 ? 's' : ''} à recompter. Recompte les lignes surlignées, sans regarder les autres.</div>` : ''}
       ${table(bar, `Bar · ${bar.length} articles du jour`, 'tirage du jour')}
       ${table(cans, 'Canettes · tous les jours', 'liste fixe')}
+      ${P.phase === 'count' && !Object.values(P.vals).some(v => Object.keys(v).length) && !P.pending.size ? `<button class="btn ghost sm" id="refaire" style="align-self:center">Refaire la liste du jour (nouvelles règles, stock et ventes de la veille à jour)</button>` : ''}
       <p class="hint" style="margin:0 4px">Touche une case : le pavé s'ouvre dessous, « Suivant » descend dans la colonne. Toute la réserve, puis le bar, puis le Mshop. Un emplacement vide se saisit 0.</p>
       <div class="ph-foot"><button class="btn brass" id="valider" ${f < t ? 'disabled' : ''}>${f < t ? `Encore ${t - f} case${t - f > 1 ? 's' : ''} à remplir` : P.phase === 'recount' ? 'Valider le recompte' : 'Valider le comptage'}</button></div>
       ${phFoot()}</div></div>`;
     app.querySelectorAll('.cell[data-a]').forEach(b => b.onclick = () => { if (P.cur) commit(); P.cur = { a: +b.dataset.a, e: b.dataset.e }; P.buf = ''; P.kegN = 0; P.kegT = false; P.chip = false; drawPhone(); scrollKp(); });
     if (P.cur) bindKeypad();
     document.getElementById('valider').onclick = valider;
+    const rf = document.getElementById('refaire');
+    if (rf) rf.onclick = async () => {
+      if (!rf.dataset.sure) { rf.dataset.sure = 1; rf.textContent = 'Confirmer : refaire la liste ?'; return; }
+      rf.disabled = true; rf.textContent = 'Nouveau tirage…';
+      try { await refaireTirage(P.date, P.comptage); C().toast('Liste du jour refaite'); phone(P.app); }
+      catch (e) { C().toast(e.message); drawPhone(); }
+    };
     majNonEnregistre();
     bindFoot();
   }
