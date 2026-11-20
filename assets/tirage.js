@@ -50,6 +50,8 @@
     const total = prio.reduce((s, a) => s + a.reste, 0);
     const cible = Math.min(p.nBar, Math.ceil(total / restants));
     for (const a of prio) { if (out.filter(o => o.motif === 'prioritaire').length >= cible) break; add(a.nom, 'prioritaire'); }
+    // Articles vendus la veille (choisis en amont, pondérés par la valeur consommée)
+    (p.veille || []).forEach(n => add(n, 'rotation'));
     // Rotation libre, tirage pondéré
     let pool = (p.rotation || []).filter(r => !pris.has(r.nom_bizzon));
     while (out.length < p.nBar && pool.length) {

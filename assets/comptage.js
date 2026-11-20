@@ -84,17 +84,21 @@
     const cal = await calendrier(T.addDays(date, -10), dim);
     const { data: arts } = await sb.from('bar_articles').select('*').eq('actif', true);
     const byNom = Object.fromEntries((arts || []).map(a => [a.nom_bizzon, a]));
-    const prio = (arts || []).filter(a => a.type === 'prioritaire');
+    // Articles sensibles : une fois par semaine par défaut (réglage « prioritaires_par_semaine »)
+    const parSem = Number(R.prioritaires_par_semaine ?? 1);
+    const prio = (arts || []).filter(a => a.type === 'prioritaire').map(a => ({ ...a, freq_semaine: parSem }));
     const cans = (arts || []).filter(a => a.type === 'canette');
     // Comptages de la semaine
-    const { data: sem } = await sb.from('bar_tirages').select('date_jour, article:bar_articles(nom_bizzon)').gte('date_jour', lun).lt('date_jour', date);
+    const { data: sem0 } = await sb.from('bar_tirages').select('date_jour, article:bar_articles(nom_bizzon)').gte('date_jour', T.addDays(date, -7)).lt('date_jour', date);
+    const sem = (sem0 || []).filter(t => t.date_jour >= lun);
+    const vus7 = new Set((sem0 || []).filter(t => t.article).map(t => t.article.nom_bizzon)); // comptés ces 7 derniers jours
     const comptes = {}, dernier = {};
     for (const t of sem || []) if (t.article) { const n = t.article.nom_bizzon; comptes[n] = (comptes[n] || 0) + 1; if (!dernier[n] || dernier[n] < t.date_jour) dernier[n] = t.date_jour; }
     let restants = 0; for (let d = date; d <= dim; d = T.addDays(d, 1)) if (T.jourActif(d, cal)) restants++;
     // Recontrôle : écarts restés hors seuil au dernier comptage
     const { data: prev } = await sb.from('bar_comptages').select('id,date_jour').lt('date_jour', date).not('valide_le', 'is', null).order('date_jour', { ascending: false }).limit(1);
     let recontrole = [];
-    if (prev && prev[0]) { const rows = await calculerEcarts(prev[0].id); recontrole = rows.filter(r => r.hors && r.article.type !== 'canette').map(r => r.article.nom_bizzon); }
+    if (prev && prev[0]) { const rows = await calculerEcarts(prev[0].id); recontrole = rows.filter(r => r.hors && !r.rc && r.article.type !== 'canette').map(r => r.article.nom_bizzon); } // seulement les écarts pas encore recomptés sur place
     // Soirée salsa depuis le dernier jour de comptage
     let precedent = T.addDays(date, -1); for (let k = 0; k < 7 && !T.jourActif(precedent, cal); k++) precedent = T.addDays(precedent, -1);
     let salsa = [];
@@ -106,22 +110,52 @@
     const { data: imps } = await sb.from('bar_imports').select('id').eq('type', 'stock').order('exporte_le', { ascending: false }).limit(1);
     let lignes = [];
     if (imps && imps[0]) { const { data } = await C().tout(() => sb.from('bar_stock_theo').select('nom_bizzon,famille,unite,prevu,vendu,prix').eq('import_id', imps[0].id).in('famille', [...fam]).order('id')); lignes = data || []; }
-    const ok = l => fam.has(l.famille) && /^1\.000 /.test(l.unite || '') && !exclus.has(l.nom_bizzon);
-    let pool = lignes.filter(l => ok(l) && Number(l.vendu) > 0);
-    if (pool.length < 15) pool = lignes.filter(l => ok(l) && (Number(l.vendu) > 0 || Number(l.prevu) > 0)); // peu de ventes : articles en stock
-    const rotation = pool.map(l => ({ nom_bizzon: l.nom_bizzon, poids: Math.sqrt(1 + Math.max(0, Number(l.vendu) || 0) * (Number(l.prix) || 0)), l })); // gros volumes en valeur : tirés plus souvent
+    const ok = l => fam.has(l.famille) && /^1\.000 /.test(l.unite || '') && !exclus.has(l.nom_bizzon) && !/\d+ ?[X*] ?\d|SIROP|MONIN|PONTHIER|LE FRUIT DE|PET\b|TETRA|1[,.]5 ?L/i.test(l.nom_bizzon); // ni packs, ni sirops, ni grands formats
+    // Consommation de la veille : ventes du dernier jour importé, traduites en articles de stock par les fiches techniques
+    const hier = {};
+    try {
+      const { data: dv } = await sb.from('bar_ventes').select('date_vente').lt('date_vente', date).order('date_vente', { ascending: false }).limit(1);
+      if (dv && dv[0]) {
+        const [{ data: ventes }, { data: fiches }, { data: fl }] = await Promise.all([
+          C().tout(() => sb.from('bar_ventes').select('article,quantite').eq('date_vente', dv[0].date_vente).order('id')),
+          C().tout(() => sb.from('bar_fiches').select('id,produit,variante').order('id')),
+          C().tout(() => sb.from('bar_fiche_lignes').select('fiche_id,nom_bizzon,quantite').order('id'))]);
+        const cle = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const ficheDe = new Map((fiches || []).map(f => [cle(f.produit + (f.variante ? ': ' + f.variante : '')), f.id]));
+        const compo = {}; (fl || []).forEach(l => (compo[l.fiche_id] = compo[l.fiche_id] || []).push(l));
+        for (const v of ventes || []) { const id = ficheDe.get(cle(v.article)); for (const l of compo[id] || []) hier[l.nom_bizzon] = (hier[l.nom_bizzon] || 0) + Number(v.quantite) * Number(l.quantite || 0); }
+      }
+    } catch (e) { /* fiches pas encore en place : on tire sans la veille */ }
+    // Panel large : tout article des familles du bar vendu ou en stock ; pas un article déjà compté ces 7 derniers jours (sauf s'il ne reste plus assez de choix)
+    let pool = lignes.filter(l => ok(l) && (Number(l.vendu) > 0 || Number(l.prevu) > 0 || hier[l.nom_bizzon] > 0));
+    const frais = pool.filter(l => !vus7.has(l.nom_bizzon));
+    if (frais.length >= 12) pool = frais;
+    const valeurHier = l => (hier[l.nom_bizzon] || 0) * (Number(l.prix) || 0);
+    const rotation = pool.map(l => ({ nom_bizzon: l.nom_bizzon, l,
+      poids: 1 + Math.sqrt(Math.max(0, Number(l.vendu) || 0) * (Number(l.prix) || 0)) / 4 + 3 * Math.sqrt(valeurHier(l)) })); // vendu hier : bien plus de chances
     // Softs en bouteille (bar + économat) : chaque jour, des places réservées, tirées au hasard
     const nSoft = Number(R.softs_par_jour ?? 2);
     const estSoft = l => l.famille === 'SOFT/EAUX MINERALES' && /^1\.000 /.test(l.unite || '') && !exclus.has(l.nom_bizzon)
       && !/SIROP|MONIN|PONTHIER|\b1L\b|1,25|1,5|1\.5|100 ?CL|PET\b|\d+ ?X ?\d|\*\d|TETRA/i.test(l.nom_bizzon)
       && (Number(l.prevu) > 0 || Number(l.vendu) > 0);
-    const recents = new Set((sem || []).filter(t => t.article && t.date_jour >= T.addDays(date, -2)).map(t => t.article.nom_bizzon));
     let softPool = lignes.filter(estSoft);
-    if (softPool.filter(l => !recents.has(l.nom_bizzon)).length >= nSoft) softPool = softPool.filter(l => !recents.has(l.nom_bizzon)); // pas les mêmes deux jours de suite
+    if (softPool.filter(l => !vus7.has(l.nom_bizzon)).length >= nSoft * 2) softPool = softPool.filter(l => !vus7.has(l.nom_bizzon)); // pas un soft compté cette semaine
     const rngS = T.rngDepuis('softs' + date), softs = [];
-    while (softs.length < nSoft && softPool.length) softs.push(softPool.splice(Math.floor(rngS() * softPool.length), 1)[0].nom_bizzon);
+    while (softs.length < nSoft && softPool.length) { // au hasard, mais un soft vendu hier a plus de chances
+      const pw = softPool.map(l => 1 + 3 * Math.sqrt(valeurHier(l))), tot = pw.reduce((a, b) => a + b, 0);
+      let x = rngS() * tot, i = 0; for (; i < pw.length - 1; i++) { x -= pw[i]; if (x <= 0) break; }
+      softs.push(softPool.splice(i, 1)[0].nom_bizzon);
+    }
+    // Places « veille » : les articles les plus consommés hier (en valeur), tirés au hasard pondéré, hors softs déjà retenus
+    const nVeille = Number(R.veille_par_jour ?? 2), rngV = T.rngDepuis('veille' + date), veille = [];
+    let vPool = pool.filter(l => valeurHier(l) > 0 && !softs.includes(l.nom_bizzon));
+    while (veille.length < nVeille && vPool.length) {
+      const pw = vPool.map(l => Math.sqrt(valeurHier(l))), tot = pw.reduce((a, b) => a + b, 0);
+      let x = rngV() * tot, i = 0; for (; i < pw.length - 1; i++) { x -= pw[i]; if (x <= 0) break; }
+      veille.push(vPool.splice(i, 1)[0].nom_bizzon);
+    }
     const choixBar = T.tirerBar({ date, nBar: 8 - softs.length, prioritaires: prio, comptesSemaine: comptes, dernierComptage: dernier, joursActifsRestants: restants,
-      recontrole, salsa, rotation: rotation.filter(r => !softs.includes(r.nom_bizzon)), rng: T.rngDepuis(date) });
+      recontrole, salsa, veille, rotation: rotation.filter(r => !softs.includes(r.nom_bizzon) && !veille.includes(r.nom_bizzon)), rng: T.rngDepuis(date) });
     const choix = choixBar.concat(softs.filter(n => !choixBar.some(c => c.nom_bizzon === n)).map(n => ({ nom_bizzon: n, motif: 'rotation' })));
     // Articles de rotation ou de salsa pas encore connus : on les crée
     const infos = Object.fromEntries(lignes.map(l => [l.nom_bizzon, l]));
@@ -482,5 +516,5 @@
     const g = el.querySelector('#goEc'); if (g) g.onclick = voirEcarts;
   }
 
-  Object.assign(window.BarViews = window.BarViews || {}, { phone, ecarts, calendrier: calendrierView, statutDuJour, calculerEcarts });
+  Object.assign(window.BarViews = window.BarViews || {}, { phone, ecarts, calendrier: calendrierView, statutDuJour, calculerEcarts, assurerTirage });
 })();
